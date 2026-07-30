@@ -1,0 +1,83 @@
+# =============================================================================
+# Revit-Cleaner - line-ending and diff policy
+#
+# This repository is Windows-only tooling (Windows PowerShell 5.1 + Autodesk
+# Revit), so the working tree uses CRLF while Git stores normalized LF in the
+# repository. Declaring `eol=crlf` explicitly means that holds for every
+# contributor regardless of their own `core.autocrlf` setting - relying on
+# `text=auto` alone leaves the checkout style up to each machine's config.
+# =============================================================================
+
+# Default: let Git detect text files, store LF in the repo, check out CRLF.
+* text=auto eol=crlf
+
+# -----------------------------------------------------------------------------
+# Windows-native scripts - always CRLF in the working tree.
+# -----------------------------------------------------------------------------
+*.ps1    text eol=crlf
+*.psm1   text eol=crlf
+*.psd1   text eol=crlf
+*.ps1xml text eol=crlf
+*.bat    text eol=crlf
+*.cmd    text eol=crlf
+
+# -----------------------------------------------------------------------------
+# Documentation and config. Covered by the `*` rule above; listed explicitly so
+# the intent survives if that default is ever changed.
+# -----------------------------------------------------------------------------
+*.md     text eol=crlf diff=markdown
+*.txt    text eol=crlf
+*.json   text eol=crlf
+*.xml    text eol=crlf
+*.yml    text eol=crlf
+*.yaml   text eol=crlf
+LICENSE  text eol=crlf
+.gitattributes text eol=crlf
+.gitignore     text eol=crlf
+
+# -----------------------------------------------------------------------------
+# Left untouched by Git's text conversion.
+#
+# .reg exports are usually UTF-16LE. Git's CRLF conversion operates on bytes
+# and would corrupt a UTF-16 file, so these are excluded from conversion
+# rather than declared as text.
+# -----------------------------------------------------------------------------
+*.reg    -text
+
+# -----------------------------------------------------------------------------
+# Binary - never convert, never diff as text.
+# -----------------------------------------------------------------------------
+*.exe    binary
+*.dll    binary
+*.msi    binary
+*.msp    binary
+*.cab    binary
+*.zip    binary
+*.7z     binary
+*.gz     binary
+*.pdf    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.svg    binary
+
+# Autodesk / Revit document formats
+*.rvt    binary
+*.rfa    binary
+*.rte    binary
+*.rft    binary
+*.nwd    binary
+*.nwc    binary
+*.nwf    binary
+*.dwg    binary
+*.dwf    binary
+*.dxf    binary
+
+# -----------------------------------------------------------------------------
+# GitHub language detection: keep the repo classified by its PowerShell, and
+# keep reference documentation out of the language statistics.
+# -----------------------------------------------------------------------------
+*.ps1    linguist-language=PowerShell
+Revit_Uninstall_Reference.md linguist-documentation

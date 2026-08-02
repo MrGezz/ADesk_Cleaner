@@ -1,11 +1,12 @@
 # Revit-Cleaner
 
-Two PowerShell uninstallers for Autodesk Revit environments on Windows. Each targets a
+Three PowerShell uninstallers for Autodesk environments on Windows. Each targets a
 different layer of the stack, and each is registry-driven, preview-first, and fully logged.
 
 | Script | Removes | Elevation |
 |---|---|---|
 | [`Uninstall-Revit.ps1`](Uninstall-Revit.ps1) | **Autodesk Revit**, any year — core application plus its orphaned add-ins, content packs, and exporters | Required (self-elevates) |
+| [`Uninstall-AutoCAD.ps1`](Uninstall-AutoCAD.ps1) | **Autodesk AutoCAD**, any year — the whole per-year product family (ODIS bundle, updates, and the two hidden MSI children) plus orphaned add-ins | Required (self-elevates) |
 | [`Uninstall-PyRevit-Complete.ps1`](Uninstall-PyRevit-Complete.ps1) | **pyRevit** and **pyRevit CLI** — clones, add-in manifests, Windows installation registrations, Start Menu entries, `PATH` entries | Optional |
 
 > Both scripts share the same philosophy: discover what is installed from the registry
@@ -17,14 +18,19 @@ different layer of the stack, and each is registry-driven, preview-first, and fu
 | Situation | Script |
 |---|---|
 | Removing Revit itself | `Uninstall-Revit.ps1` |
+| Removing AutoCAD itself | `Uninstall-AutoCAD.ps1` |
 | Revit uninstall fails with `1603`, `1606`, or `2753` | `Uninstall-Revit.ps1` — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
+| AutoCAD uninstall fails with `1603` or `2753` | `Uninstall-AutoCAD.ps1` — same automated remediation |
+| AutoCAD still listed in Add/Remove Programs after a "successful" uninstall | `Uninstall-AutoCAD.ps1` — it also removes the two hidden MSI children |
+| A reinstalled AutoCAD came back with the old broken profile | `Uninstall-AutoCAD.ps1 -RemoveResidualRegistry:$true` |
 | pyRevit installer reports a **leftover installation folder** | `Uninstall-PyRevit-Complete.ps1` |
 | pyRevit still listed in Add/Remove Programs after deleting its folder | `Uninstall-PyRevit-Complete.ps1` |
 | pyRevit ribbon still loading, or a stale clone needs replacing | `Uninstall-PyRevit-Complete.ps1` |
-| Wiping a machine completely | pyRevit first, then Revit |
+| Wiping a machine completely | pyRevit first, then Revit, then AutoCAD |
 
 Removing pyRevit before Revit lets pyRevit detach from each Revit installation while its CLI
-still exists, which leaves no orphaned add-in manifests behind.
+still exists, which leaves no orphaned add-in manifests behind. AutoCAD goes last because
+Revit and Navisworks consume `RealDWG Shared`, which all three scripts preserve.
 
 ---
 
@@ -148,6 +154,121 @@ When you want Revit back:
 - Self-elevation opens a separate elevated window that closes on completion — watch the `%TEMP%` log for results rather than the original window.
 - Tested on Windows PowerShell 5.1. PowerShell 7 should work but is not the primary target.
 - This tool is not affiliated with or endorsed by Autodesk. "Revit", "AutoCAD", and "Navisworks" are trademarks of Autodesk, Inc.
+
+---
+
+## `Uninstall-AutoCAD.ps1` — Autodesk AutoCAD
+
+A scoped, self-elevating PowerShell script that cleanly uninstalls **any year of Autodesk AutoCAD** on Windows — the whole per-year product family plus its orphaned add-ins — while preserving shared Autodesk components, other AutoCAD years, and AutoCAD toolsets. The target release is chosen with `-ProductYear` (default `2026`).
+
+AutoCAD is harder to remove correctly than Revit, for three reasons this script is built around:
+
+1. **It is a family, not a product.** Each year registers four separate entries: an ODIS *update* bundle, the ODIS *bundle wrapper*, and two **hidden** MSI children (`SystemComponent=1`, so they never appear in Add/Remove Programs). The MSI children carry **no `UninstallString` and no `QuietUninstallString` at all** — `msiexec` against their product code is the only route.
+2. **`ACAD Private` is unnameable.** One of the hidden children is called exactly `ACAD Private` — no year, no "AutoCAD" in the name — and **every installed AutoCAD year registers one under that identical name**. No name rule can reach it, and de-duplicating a target list by display name would collapse all of them into one arbitrary entry. This script matches it by install location and de-duplicates by **product code**.
+3. **The release number is not the year.** AutoCAD 2025 is `R25.0`, **2026 is `R25.1`**, 2027 is `R26.0`. The per-user profile keys live under `...\Autodesk\AutoCAD\R<release>` with the year appearing nowhere, so deleting the wrong one wipes a *different* version's profiles, toolbars, and plotter settings. The release is therefore **read from the registry, never computed** — and when it cannot be proven, release-scoped cleanup is skipped rather than guessed.
+
+> Built on the same hardened MSI machinery as `Uninstall-Revit.ps1`. The 2753 remediation is not inherited by analogy: the AutoCAD core package carries the *same* file-sourced custom action (`_560A25DD.D5955B9C…`, type 3217) that produced the Revit failure.
+
+### Features
+
+- **Any AutoCAD year** via `-ProductYear` — one script for 2018–2027+.
+- **Registry-driven discovery** across the 64-bit, 32-bit (WOW6432Node), and per-user uninstall hives — no hardcoded product GUIDs.
+- **Finds the hidden components** other uninstallers leave behind (`ACAD Private`, `AutoCAD <year> - <lang>`), attributed to the correct year by install location.
+- **Explicit removal order** — update bundles → add-ins → ODIS bundle wrapper → MSI children — with a re-check before each step, since the wrapper normally removes its own children.
+- **Runtime release resolution** (`2026 → R25.1`), never arithmetic.
+- **Toolset guard.** Aborts before removing base AutoCAD when a toolset that shares the install tree or release key (Architecture, Mechanical, Electrical, MEP, Map 3D, Plant 3D, P&ID, Raster Design, Civil 3D) is installed for the target year. Override with `-IgnoreToolsetGuard`.
+- **Year-scoped process guard.** Identifies running AutoCAD processes by executable path, so a drawing open in *another* installed year is never closed.
+- **Correct ODIS invocation.** Runs Autodesk's `AdODIS\V1\Installer.exe` directly (not through `cmd`), so its unquoted, space-containing path is handled properly.
+- **Multi-method resolution** per product, with **per-attempt verbose MSI logs** and automatic `1603`+`2753` remediation (neutralize → recache → retry).
+- **Self-elevation** via UAC, **preview mode** (`-ListOnly`), and full `-WhatIf` support.
+- **Guarded residual cleanup** of files, and opt-in cleanup of the release-scoped registry keys.
+
+### Requirements
+
+- Windows 10/11
+- Windows PowerShell 5.1 (built in) — no modules required
+- Administrator rights (the script self-elevates via UAC)
+
+### Usage
+
+```powershell
+# Preview only for the default year (2026) — lists matches, changes nothing:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ListOnly
+
+# Preview a specific year:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2025 -ListOnly
+
+# Interactive — prompts before each product and each residual folder:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2025
+
+# Fully unattended and silent, closing AutoCAD if it is open:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2025 -StopAutoCAD -Force
+
+# Full wipe including the release-scoped profile keys:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2026 -RemoveResidualRegistry:$true -Force
+```
+
+Run `-ListOnly` first. It is the safety gate: it shows the resolved release, the exact four-entry family in removal order, and every residual location before you commit.
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-ProductYear` | string | `2026` | Four-digit AutoCAD release year to target. Scopes the core match, add-in sweep, residual folders, the residual guard, and the self-elevation relaunch. Validated as four digits. |
+| `-IncludeAddins` | bool | `$true` | Also remove every product whose name references AutoCAD **and** the target year (object enablers, language packs, extensions). Disable with `-IncludeAddins:$false`. |
+| `-IncludeMaterialLibraries` | bool | `$false` | Opt in to also remove Material Library packages matching the target year. Off by default because material libraries are shared across products. |
+| `-RemoveResidualFiles` | bool | `$true` | After a successful uninstall, delete leftover AutoCAD-`<year>` folders. Every path carries the year, so this never needs the release number. |
+| `-RemoveResidualRegistry` | bool | `$false` | **Opt-in.** Also delete `HKCU`/`HKLM:\SOFTWARE\Autodesk\AutoCAD\R<release>`. Only acts when the release-to-year mapping was proven and no other product still claims that release. |
+| `-NeutralizeBrokenCustomActions` | bool | `$true` | On `1603` + `Internal Error 2753`, neutralize the broken custom action in a patched copy of the cached package, recache it (`/fv`), and retry. |
+| `-StopAutoCAD` | switch | off | Terminate target-year AutoCAD processes if running. Other years are identified by path and never touched. Without it, the script aborts when a target-year process is open. |
+| `-IgnoreToolsetGuard` | switch | off | Proceed even when a toolset sharing the base install tree or release key is installed for the target year. |
+| `-ListOnly` | switch | off | Discover and print matches, then exit. No changes. |
+| `-Force` | switch | off | Fully non-interactive: skips per-item prompts **and** suppresses PowerShell's built-in confirmation. |
+| `-LogPath` | string | `%TEMP%\...` | Override the transcript log path. |
+
+### How it works
+
+**Release resolution.** `HKLM:\SOFTWARE\Autodesk\AutoCAD\R<rel>\ACAD-<id>:<lcid>` carries `UPIRELEASE`, `ProductNameGlob`, `ProductName`, and `Location`. The script scans every release container and keeps the one whose product keys prove the target year. If two releases claim the same year, or none does, release-scoped operations are skipped and logged.
+
+**Product selection.** Core patterns are anchored (`AutoCAD <year>*`, `Autodesk AutoCAD <year>*`) with no leading wildcard, so `Autodesk AutoCAD MEP 2026 - English` and `AutoCAD LT 2026` can never match — both carry a token between "AutoCAD" and the year. `ACAD Private` is matched separately by install location, gated on a real MSI registration. The target list is then de-duplicated **by product code**. Shared components are excluded by name — notably `RealDWG Shared <year>` and `Shared Components <year>`, which carry a year but are consumed by Revit, Navisworks, and Inventor.
+
+**Removal order,** with the registration re-checked before each step:
+
+1. **Update bundles** — patches on the base; removing them first returns it to the state its own uninstaller expects and leaves no orphaned entry.
+2. **Add-ins / extras** — depend on the base, so they go while it still exists and their uninstall actions can still resolve it.
+3. **ODIS bundle wrapper** — the orchestrator for the core product.
+4. **MSI children** — normally already gone after step 3, so these usually report `1605` ("not installed"), which counts as success.
+
+Exit codes `0`, `3010` (reboot required), and `1605` (already gone) are treated as success.
+
+### Safety
+
+- **Preview-first** with `-ListOnly` and full `-WhatIf`.
+- **Toolset guard aborts by default** rather than silently orphaning Civil 3D or a toolset.
+- **Other AutoCAD years are never touched** — not their products, not their residual folders, not their running processes.
+- **A process with no resolvable path is never killed.** It is reported instead, because it cannot be proven to belong to the target year.
+- **Shared Autodesk infrastructure keeps running** — the licensing service, Identity Manager, and Autodesk Access are deliberately absent from the process list.
+- **Residual file cleanup is gated** on a successful uninstall and constrained by a runtime guard: a path must sit under an `...\Autodesk\...` tree, reference `AutoCAD`, and contain the target year, or it is refused and logged.
+- **Residual registry cleanup is opt-in and doubly gated** — the release must have been proven from the registry, the key path must match `...\AutoCAD\R<n>.<n>` exactly, and a post-uninstall re-census must find nothing under that release still claiming a different year.
+
+### Logging
+
+Every run writes a full transcript to `%TEMP%\Uninstall-AutoCAD<year>_<timestamp>.log`. Each MSI attempt additionally writes its own verbose Windows Installer log to `%TEMP%\MSIVerbose_<guid>_<stamp>_<Kind>.log`. Attach these logs when reporting issues.
+
+### Reinstalling AutoCAD later
+
+Reinstall-safe for the same reasons as the Revit script: products go through Autodesk's own uninstallers, so registrations are cleared rather than force-deleted, and the Autodesk installer framework (ODIS / Autodesk Access), Genuine Service, licensing, and shared libraries are preserved. Reboot first, then install through Autodesk Access.
+
+`-RemoveResidualRegistry` is the switch to use when a *previous* AutoCAD install left a corrupt profile that a reinstall keeps resurrecting — that state lives in `...\AutoCAD\R<release>`, not in the program folder.
+
+### Notes and limitations
+
+- The ODIS bundle uninstall can take several minutes; it removes each sub-component MSI in sequence.
+- The two hidden MSI children are expected to report `1605` when reached — that means the ODIS wrapper already removed them, and it is treated as success.
+- `-RemoveResidualFiles` deletes per-user settings and profiles. Custom `.cuix` files, plotter configurations, and templates stored inside those trees go with them; drawings under `Documents\` are untouched.
+- The directory-property override kept as the last `msiexec` attempt is a generic last resort here, not a targeted fix: the AutoCAD packages inspected do not carry the `DIRCA_INSTALLDIR` action that made it the specific remedy on Revit.
+- Tested on Windows PowerShell 5.1 against a machine with AutoCAD 2025, 2026, and 2027 installed side by side.
+- This tool is not affiliated with or endorsed by Autodesk. "AutoCAD", "Revit", and "Civil 3D" are trademarks of Autodesk, Inc.
 
 ---
 

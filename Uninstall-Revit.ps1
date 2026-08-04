@@ -273,6 +273,11 @@ Write-Log ("Mode: {0}{1}{2}{3}" -f `
 # when the registry key lacks the requested value.
 function Get-Prop {
     param($Obj, [string]$Name)
+    # A registry key that carries NO values makes Get-ItemProperty return $null
+    # (no exception). Dereferencing .PSObject on $null throws
+    # PropertyNotFoundStrict under Set-StrictMode -Version Latest, which is what
+    # aborted the whole hive enumeration on the first valueless Uninstall subkey.
+    if ($null -eq $Obj) { return $null }
     $p = $Obj.PSObject.Properties[$Name]
     if ($null -ne $p) { return $p.Value }
     return $null

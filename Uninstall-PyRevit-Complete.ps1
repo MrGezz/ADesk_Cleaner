@@ -17,12 +17,17 @@ param(
 
     [switch]$Force,             # no confirmation prompts
 
-    [switch]$KeepCli            # leave pyRevit CLI installed
+    [switch]$KeepCli            # leave pyRevit CLI installed: registration, files AND PATH
 )
 
 $ErrorActionPreference = 'Continue'
 $script:LogPath  = Join-Path $env:TEMP ("pyrevit_uninstall_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
 $script:Failures = [System.Collections.Generic.List[string]]::new()
+# Install root(s) of the CLI, snapshotted in phase 3 from the same registration
+# objects the -KeepCli guard tests, and everything -KeepCli deliberately left
+# behind so phase 9 can report it as intentional instead of as a leftover.
+$script:CliRoots = @()
+$script:CliKept  = [System.Collections.Generic.List[string]]::new()
 
 # -----------------------------------------------------------------------------
 # Infrastructure
@@ -131,6 +136,50 @@ $UninstallRoots = @(
     'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
 )
 
+# --- "Is this the CLI rather than pyRevit itself?" - one definition ----------
+# -KeepCli has to answer this in five places: the registration guard (phases 3
+# and 7), the folder sweep (5), the Start Menu sweep (6), the PATH edit (8) and
+# the verdict (9). It used to be answered only in phase 3, so a -KeepCli run left
+# the CLI REGISTERED while phase 5 deleted its install folder and phase 8 dropped
+# its PATH entry - manufacturing exactly the orphaned registration this script
+# exists to repair (README: deleting the install folder without running
+# unins000.exe ORPHANS that registry key). These two tests are the single source
+# of truth; nothing below re-decides "is this the CLI" on its own.
+function Test-IsCliName {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    return ($Value -imatch 'pyrevit\s*cli')
+}
+
+# Folder / PATH-segment form of the same question. The name test alone already
+# covers the documented default location - %LOCALAPPDATA%\Programs\pyRevit CLI,
+# confirmed on 6.4.0 and hard-coded as a CLI probe candidate below - while
+# $script:CliRoots adds the InstallLocation the CLI's own registration reports,
+# so a CLI whose path carries no "pyRevit CLI" token is protected too.
+function Test-IsCliPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+
+    # PATH is read raw so REG_EXPAND_SZ survives, which means a segment can still
+    # be "%LOCALAPPDATA%\Programs\pyRevit CLI\bin". Test both forms.
+    $forms    = @($Path.Trim().Trim('"'))
+    $expanded = [Environment]::ExpandEnvironmentVariables($forms[0])
+    if ($expanded -ne $forms[0]) { $forms += $expanded }
+
+    foreach ($f in $forms) {
+        if (Test-IsCliName $f) { return $true }
+        $t = $f.TrimEnd('\')
+        foreach ($root in @($script:CliRoots)) {
+            if (-not $root) { continue }
+            # StartsWith rather than -like: an install path may legitimately
+            # contain '[', which -like would read as a wildcard.
+            if ($t.Equals($root, [StringComparison]::OrdinalIgnoreCase) -or
+                $t.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+    }
+    return $false
+}
+
 function Get-PyRevitRegistrations {
     foreach ($root in $UninstallRoots) {
         if (-not (Test-Path -LiteralPath $root)) { continue }
@@ -142,7 +191,7 @@ function Get-PyRevitRegistrations {
                    ($p.Publisher     -imatch 'pyrevit') -or
                    ($p.InstallLocation -imatch 'pyrevit')
             if ($hit) {
-                $isCli = ($p.DisplayName -imatch 'pyrevit\s*cli') -or ($p.InstallLocation -imatch 'pyRevit\s*CLI')
+                $isCli = (Test-IsCliName $p.DisplayName) -or (Test-IsCliName $p.InstallLocation)
                 [pscustomobject]@{
                     RegPath   = $key.PSPath
                     Pretty    = ($key.PSPath -replace '^.*Registry::','')
@@ -250,13 +299,27 @@ function Remove-PyRevitFromPath {
     $kind = $key.GetValueKind('Path')
 
     $parts = $raw -split ';'
-    $keep  = @($parts | Where-Object { $_ -inotmatch 'pyrevit' })
+    $hits  = @($parts | Where-Object { $_ -imatch 'pyrevit' })
 
-    if ($keep.Count -eq $parts.Count) {
-        Write-Log "$Scope PATH: no pyRevit entries"
+    # -KeepCli protects the CLI's own bin entry for the same reason phase 3
+    # leaves its registration alone: a CLI that is still installed and still
+    # registered but no longer resolves on PATH has not been "kept", it has been
+    # broken - and the operator asked for it precisely so they could keep driving
+    # clones with it.
+    $cliKeep = @($hits | Where-Object { $KeepCli -and (Test-IsCliPath $_) })
+    $dropped = @($hits | Where-Object { $cliKeep -notcontains $_ })
+    $keep    = @($parts | Where-Object { $dropped -notcontains $_ })
+
+    foreach ($k in $cliKeep) {
+        Write-Log "$Scope PATH entry kept (-KeepCli, belongs to pyRevit CLI): $k" 'WARN'
+        $script:CliKept.Add("$Scope PATH: $k")
+    }
+
+    if ($dropped.Count -eq 0) {
+        if ($cliKeep.Count -eq 0) { Write-Log "$Scope PATH: no pyRevit entries" }
+        else { Write-Log "$Scope PATH: only pyRevit CLI entries present - nothing to remove" }
         return
     }
-    $dropped = @($parts | Where-Object { $_ -imatch 'pyrevit' })
     foreach ($d in $dropped) { Write-Log "$Scope PATH entry to drop: $d" }
 
     if ($DryRun) { Write-Log "would rewrite $Scope PATH (kind $kind, empty segments preserved)" 'DRY'; return }
@@ -397,6 +460,21 @@ if (-not $extFound) {
 # the pyRevit installer then reports a leftover installation.
 Write-Section '3. Registered pyRevit installations'
 $regs = @(Get-PyRevitRegistrations)
+# Snapshot the CLI's install root from the SAME objects the -KeepCli guard below
+# tests, and do it before any uninstaller runs, so phases 5/8/9 preserve exactly
+# what phase 3 preserved instead of re-deriving it from a machine that has since
+# changed underneath them.
+if ($KeepCli) {
+    $script:CliRoots = @($regs | Where-Object { $_.IsCli } |
+        ForEach-Object { "$($_.Location)".Trim().Trim('"').TrimEnd('\') } |
+        # An InstallLocation whose LEAF is not itself pyRevit-named is a parent
+        # directory, not an install root - the trap the Navisworks script hit
+        # with ODIS wrappers registering "C:\Program Files\Autodesk". Accepting
+        # "...\Programs" here would protect every clone installed beside the CLI
+        # and let phase 9 call the run CLEAN with pyRevit still on disk.
+        Where-Object { $_ -and (($_ -split '\\')[-1] -imatch 'pyrevit') } |
+        Select-Object -Unique)
+}
 if (-not $regs) {
     Write-Log 'no pyRevit entries in the Windows uninstall registry'
 } else {
@@ -408,7 +486,11 @@ if (-not $regs) {
 }
 
 foreach ($r in $regs) {
-    if ($r.IsCli -and $KeepCli) { Write-Log "skipping (-KeepCli): $($r.Name)" 'WARN'; continue }
+    if ($r.IsCli -and $KeepCli) {
+        Write-Log "skipping (-KeepCli): $($r.Name)" 'WARN'
+        $script:CliKept.Add("registration: $($r.Name)")
+        continue
+    }
 
     $cmd = $r.QuietStr
     if (-not $cmd) { $cmd = $r.UninStr }
@@ -475,6 +557,15 @@ Write-Section '5. Leftover folders'
 $folders = @(Get-PyRevitFolders)
 if (-not $folders) { Write-Log 'no pyRevit folders remain' }
 foreach ($f in $folders) {
+    # The '*pyrevit*' glob over %LOCALAPPDATA%\Programs returns 'pyRevit CLI' -
+    # the CLI's own install folder, holding the unins000.exe that phase 3 was
+    # told not to run. Deleting it here is what turned -KeepCli into "keep the
+    # registration, destroy the product".
+    if ($KeepCli -and (Test-IsCliPath $f)) {
+        Write-Log "keeping (-KeepCli, pyRevit CLI install folder): $f" 'WARN'
+        $script:CliKept.Add("folder: $f")
+        continue
+    }
     if (-not (Test-IsAdmin)) {
         if ($f -like "$env:PROGRAMDATA*" -or $f -like "$env:PROGRAMFILES*" -or $f -like "${env:ProgramFiles(x86)}*") {
             Write-Log "skipping (needs elevation): $f" 'WARN'
@@ -498,7 +589,15 @@ foreach ($m in $menuRoots) {
         Where-Object { $_.Name -imatch 'pyrevit' })
 }
 if (-not $shortcuts) { Write-Log 'no pyRevit Start Menu entries' }
-foreach ($s in $shortcuts) { Remove-Tree $s.FullName 'start menu' }
+foreach ($s in $shortcuts) {
+    # Same guard as phase 5, for the same reason: a kept CLI keeps its shortcut.
+    if ($KeepCli -and (Test-IsCliPath $s.FullName)) {
+        Write-Log "keeping (-KeepCli, pyRevit CLI shortcut): $($s.FullName)" 'WARN'
+        $script:CliKept.Add("start menu: $($s.FullName)")
+        continue
+    }
+    Remove-Tree $s.FullName 'start menu'
+}
 
 # --- 7. Remaining registry footprint ---------------------------------------
 Write-Section '7. Registry footprint'
@@ -530,10 +629,23 @@ Publish-EnvironmentChange
 
 # --- 9. Verify --------------------------------------------------------------
 Write-Section '9. Verification'
+# -KeepCli leaves the CLI's registration, install folder, shortcut and PATH entry
+# behind on purpose, so they are reported here as kept and excluded from the
+# verdict below. Counting them would end every -KeepCli run in NOT CLEAN and bury
+# any genuine leftover in that noise. Printed outside the -DryRun branch so a
+# preview run states what it would preserve too.
+if ($KeepCli) {
+    if ($script:CliKept.Count -gt 0) {
+        Write-Log 'kept by -KeepCli (pyRevit CLI stays installed, registered and on PATH):' 'WARN'
+        foreach ($k in $script:CliKept) { Write-Log "    - $k" 'WARN' }
+    } else {
+        Write-Log '-KeepCli was specified but no pyRevit CLI was found to keep' 'WARN'
+    }
+}
 if ($DryRun) {
     Write-Log 'skipped (dry run)' 'DRY'
 } else {
-    $remFolders = @(Get-PyRevitFolders)
+    $remFolders = @(Get-PyRevitFolders | Where-Object { -not ($KeepCli -and (Test-IsCliPath $_)) })
     $remAddins  = @(Get-PyRevitAddinFiles)
     $remRegs    = @(Get-PyRevitRegistrations | Where-Object { -not ($_.IsCli -and $KeepCli) })
     $remPath    = @()
@@ -541,7 +653,9 @@ if ($DryRun) {
         $kp = if ($sc -eq 'User') { 'HKCU:\Environment' } else { 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' }
         if (Test-Path -LiteralPath $kp) {
             $v = (Get-Item -LiteralPath $kp).GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-            if ($v) { $remPath += @(($v -split ';') | Where-Object { $_ -imatch 'pyrevit' } | ForEach-Object { "$sc PATH: $_" }) }
+            if ($v) { $remPath += @(($v -split ';') |
+                Where-Object { $_ -imatch 'pyrevit' -and -not ($KeepCli -and (Test-IsCliPath $_)) } |
+                ForEach-Object { "$sc PATH: $_" }) }
         }
     }
 
@@ -553,7 +667,11 @@ if ($DryRun) {
     $clean = ($remFolders.Count + $remAddins.Count + $remRegs.Count + $remPath.Count) -eq 0
     Write-Host ''
     if ($clean -and $script:Failures.Count -eq 0) {
-        Write-Log 'CLEAN - no pyRevit files, registrations, or PATH entries remain.' 'OK'
+        if ($script:CliKept.Count -gt 0) {
+            Write-Log 'CLEAN - nothing remains except the pyRevit CLI that -KeepCli was told to keep.' 'OK'
+        } else {
+            Write-Log 'CLEAN - no pyRevit files, registrations, or PATH entries remain.' 'OK'
+        }
         Write-Log 'Reinstalling should no longer report a leftover installation.' 'OK'
     } else {
         Write-Log 'NOT CLEAN - items above still exist.' 'ERROR'

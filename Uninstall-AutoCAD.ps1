@@ -754,6 +754,20 @@ if ($release) { $AcadRoots += $release.Roots }
 $AcadRoots += $DefaultAcadRoot
 $AcadRoots = @($AcadRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
 
+# Fold the REGISTRY-RESOLVED roots into the residual list, which up to here knew
+# only $DefaultAcadRoot under %ProgramFiles%. AutoCAD is routinely installed off
+# the system drive when the system SSD is small, and the roots for that case are
+# already in hand - line ~742 above even LOGS them ("Install root(s):
+# D:\Autodesk\AutoCAD 2026"). Without this the multi-gigabyte program folder
+# survived a full run in silence, and -ListOnly reported "No AutoCAD <year>
+# residual folders found" for a folder sitting right there. Test-SafeResidualPath
+# still vets every entry at deletion time, so a root that carries no 'Autodesk'
+# segment is refused rather than deleted.
+#
+# @()-wrapped: a union that collapses to a single string turns any later '+='
+# into string concatenation instead of an array append.
+$ResidualPaths = @(@($ResidualPaths) + @($AcadRoots) | Select-Object -Unique)
+
 $all = @(Get-InstalledPrograms |
     Where-Object { $_.Publisher -like '*Autodesk*' -or $_.DisplayName -like '*AutoCAD*' })
 
@@ -907,6 +921,22 @@ $targets | ForEach-Object {
     $tag = switch ($_.Rank) { 1 { 'update ' } 2 { 'add-in ' } 3 { 'core   ' } default { 'msi    ' } }
     $hid = if ($_.SystemComponent -eq 1) { '  (hidden from Add/Remove Programs)' } else { '' }
     Write-Log ("    {0}{1}  [{2}]  {3}{4}" -f $tag, $_.DisplayName, $_.DisplayVersion, $_.KeyName, $hid)
+}
+
+# The per-user entries in $ResidualPaths come from the ELEVATED process's
+# environment. When self-elevation crossed accounts (UAC asked for admin
+# CREDENTIALS rather than consent, i.e. the signed-in user is not a local admin -
+# standard corporate configuration, and how a technician runs this on someone
+# else's machine), %APPDATA% is the ADMINISTRATOR's profile and the real user's
+# AutoCAD profiles, toolbars and plotter settings are never reached. Report it
+# rather than silently cleaning the wrong profile and calling the run a success.
+$invokingUser = $null
+try { $invokingUser = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName } catch { }
+if ($invokingUser) {
+    $shortName = ($invokingUser -split '\\')[-1]
+    if ($shortName -and $env:USERNAME -and $shortName -ne $env:USERNAME) {
+        Write-Log "Elevated as '$env:USERNAME' but the signed-in user is '$shortName'. Per-user residual folders under %APPDATA%/%LOCALAPPDATA% will be cleaned for '$env:USERNAME' ONLY - '$shortName' keeps their AutoCAD profile. Re-run from that account to clear it." 'WARN'
+    }
 }
 
 if ($ListOnly) {
@@ -1486,6 +1516,11 @@ function Get-UninstallCandidates {
 $successCodes = @(0, 1605, 3010)   # 1605 = "not installed" (already gone) -> treat as non-fatal
 $rebootNeeded = $false
 $failures     = 0
+# Declines are tracked separately from failures. A product the operator skipped
+# is still INSTALLED, so residual cleanup must not run against it - but it is
+# not a failure either, and conflating the two would report exit 3 for a
+# deliberate choice.
+$skipped      = 0
 
 foreach ($product in $targets) {
 
@@ -1497,15 +1532,27 @@ foreach ($product in $targets) {
         continue
     }
 
-    if (-not $Force) {
+    # Gated on $WhatIfPreference as well as -Force, matching the two residual
+    # prompts further down. Under -WhatIf the run has already announced that
+    # nothing will be removed, and prompting there both makes a preview
+    # interactive and lets a "No" - the natural answer to a question asked
+    # during a preview - silently drop the product from the preview it was
+    # supposed to be showing.
+    if (-not $Force -and -not $WhatIfPreference) {
         $answer = Read-Host "Uninstall '$($product.DisplayName)'? [Y/N]"
         if ($answer -notmatch '^(y|yes)$') {
             Write-Log "Skipped by user: $($product.DisplayName)" 'WARN'
+            $skipped++
             continue
         }
     }
 
     if (-not $PSCmdlet.ShouldProcess($product.DisplayName, 'Uninstall')) {
+        # A real decline ("No"/"No to All" at the ConfirmImpact=High prompt), not
+        # a -WhatIf preview: the product stays installed and must suppress
+        # residual cleanup, which would otherwise delete the files out from under
+        # a still-registered AutoCAD.
+        if (-not $WhatIfPreference) { $skipped++ }
         continue
     }
 
@@ -1843,6 +1890,11 @@ if ($failures -gt 0) {
         Write-Log 'Skipping residual cleanup because one or more products failed to uninstall. Re-run after the uninstall succeeds.' 'WARN'
     }
 }
+elseif ($skipped -gt 0) {
+    if ($RemoveResidualFiles -or $RemoveResidualRegistry) {
+        Write-Log "Skipping residual cleanup because $skipped product(s) were declined and are still installed. Deleting their files would leave a registered product with no files." 'WARN'
+    }
+}
 else {
     if ($RemoveResidualFiles) {
         Write-Log "Scanning for AutoCAD $ProductYear residual folders..."
@@ -1863,10 +1915,17 @@ if ($failures -eq 0) {
         Write-Log 'Preview complete. NOTHING was uninstalled, deleted or modified.' 'OK'
         Write-Log 'Re-run the same command without -WhatIf to perform the removal.'
     }
+    elseif ($skipped -gt 0) {
+        # A declined product is still installed and still registered, so this run
+        # did not do what its command line asked. "Completed." here would tell an
+        # operator - and anything scraping this log - that AutoCAD is gone when it
+        # is sitting untouched in Add/Remove Programs.
+        Write-Log "Completed with $skipped product(s) declined and still installed." 'WARN'
+    }
     else {
         Write-Log 'Completed. Shared Autodesk components were preserved.' 'OK'
-        if ($rebootNeeded) { Write-Log 'A reboot is recommended to finalize removal.' 'WARN' }
     }
+    if ($rebootNeeded) { Write-Log 'A reboot is recommended to finalize removal.' 'WARN' }
 }
 else {
     Write-Log "Completed with $failures failure(s). Review the log: $LogPath" 'ERROR'

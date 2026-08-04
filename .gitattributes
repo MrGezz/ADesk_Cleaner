@@ -1,5 +1,5 @@
 # =============================================================================
-# Revit-Cleaner - line-ending and diff policy
+# ADesk_Cleaner - line-ending and diff policy
 #
 # This repository is Windows-only tooling (Windows PowerShell 5.1 + Autodesk
 # Revit), so the working tree uses CRLF while Git stores normalized LF in the

@@ -359,6 +359,22 @@ if ($targets.Count -eq 0) {
 Write-Log "Matched $($targets.Count) product(s) for removal:" 'OK'
 $targets | ForEach-Object { Write-Log ("    - {0}  [{1}]" -f $_.DisplayName, $_.DisplayVersion) }
 
+# The three per-user entries in $ResidualPaths come from the ELEVATED process's
+# environment. When self-elevation crossed accounts (UAC asked for admin
+# CREDENTIALS rather than consent, i.e. the signed-in user is not a local admin -
+# standard corporate configuration, and how a technician runs this on someone
+# else's machine), %APPDATA% is the ADMINISTRATOR's profile and the real user's
+# Revit settings, journals and add-in manifests are never reached. Report it
+# rather than silently cleaning the wrong profile and calling the run a success.
+$invokingUser = $null
+try { $invokingUser = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName } catch { }
+if ($invokingUser) {
+    $shortName = ($invokingUser -split '\\')[-1]
+    if ($shortName -and $env:USERNAME -and $shortName -ne $env:USERNAME) {
+        Write-Log "Elevated as '$env:USERNAME' but the signed-in user is '$shortName'. Per-user residual folders under %APPDATA%/%LOCALAPPDATA% will be cleaned for '$env:USERNAME' ONLY - '$shortName' keeps their Revit profile. Re-run from that account to clear it." 'WARN'
+    }
+}
+
 if ($ListOnly) {
     if ($RemoveResidualFiles) {
         $existing = @($ResidualPaths | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
@@ -555,9 +571,22 @@ function Clear-MsiSourceListRegistry {
 
 
 
+# Deep-patch Error 1606 by rewriting the product's own entry in the "Squished"
+# internal MSI GUID cache when its InstallLocation is blank or relative.
+#
+# The install root is passed IN, per product, and is never derived from
+# $ProductYear here. $targets is the core application PLUS every Revit <year>
+# add-in, exporter, DB Link, IFC and content pack, and the guard below fires on
+# any package that never set ARPINSTALLLOCATION - the normal state for those
+# add-in MSIs. Deriving the path locally therefore stamped the CORE application's
+# program folder into unrelated products' Windows Installer registrations.
 function Repair-MsiUserDataCache {
-    param([string]$ProductCode, [string]$TargetYear)
-    # Deep-patch Error 1606 by recalculating to a "Squished" internal MSI GUID cache
+    param([string]$ProductCode, [string]$InstallRoot)
+    # No own root -> no repair. Guessing one is the defect this replaces.
+    if ([string]::IsNullOrWhiteSpace($InstallRoot)) { return }
+    # A root that is not itself absolute is no better than the blank/relative
+    # value being repaired - writing it back just re-creates the 1606.
+    if ($InstallRoot -notmatch '^([a-zA-Z]:[\\/]|\\\\)') { return }
     $squished = Get-MsiSquishedGuid -ProductCode $ProductCode
     if (-not $squished) { return }
 
@@ -566,8 +595,9 @@ function Repair-MsiUserDataCache {
     if (Test-Path -LiteralPath $msiHive) {
         try {
             $il = Get-ItemProperty -Path $msiHive -Name 'InstallLocation' -ErrorAction SilentlyContinue
-            if ($null -eq $il -or [string]::IsNullOrWhiteSpace($il.InstallLocation) -or $il.InstallLocation -notmatch '^([a-zA-Z]:[\\/]|\\\\)') {
-                $fixPath = Join-Path ${env:ProgramFiles} "Autodesk\Revit $TargetYear\"
+            $cur = Get-Prop $il 'InstallLocation'
+            if ([string]::IsNullOrWhiteSpace($cur) -or $cur -notmatch '^([a-zA-Z]:[\\/]|\\\\)') {
+                $fixPath = $InstallRoot.TrimEnd('\') + '\'
                 Set-ItemProperty -LiteralPath $msiHive -Name 'InstallLocation' -Value $fixPath -ErrorAction Stop
                 Write-Log "Patched internal MSI cache location to bypass Error 1606:`n      New: $fixPath" 'WARN'
             }
@@ -850,18 +880,30 @@ function Get-UninstallCandidates {
 $successCodes = @(0, 1605, 3010)   # 1605 = "not installed" (already gone) -> treat as non-fatal
 $rebootNeeded = $false
 $failures     = 0
+# Declines are tracked separately from failures. A product the operator skipped
+# is still INSTALLED, so residual cleanup must not run against it - but it is
+# not a failure either, and conflating the two would report exit 3 for a
+# deliberate choice.
+$skipped      = 0
 
 foreach ($product in $targets) {
 
-    if (-not $Force) {
+    # Gated on $WhatIfPreference as well as -Force: under -WhatIf nothing is
+    # removed, so prompting there both makes a preview interactive and lets a
+    # "No" silently drop the product from the preview it was supposed to show.
+    if (-not $Force -and -not $WhatIfPreference) {
         $answer = Read-Host "Uninstall '$($product.DisplayName)'? [Y/N]"
         if ($answer -notmatch '^(y|yes)$') {
             Write-Log "Skipped by user: $($product.DisplayName)" 'WARN'
+            $skipped++
             continue
         }
     }
 
     if (-not $PSCmdlet.ShouldProcess($product.DisplayName, 'Uninstall')) {
+        # A real decline ("No"/"No to All"), not a -WhatIf preview: the product
+        # stays installed and must suppress residual cleanup.
+        if (-not $WhatIfPreference) { $skipped++ }
         continue
     }
 
@@ -870,7 +912,12 @@ foreach ($product in $targets) {
     # machine; running them before Read-Host/ShouldProcess mutated state even
     # when the answer was No or the run was -WhatIf.
     if ($product.WindowsInstaller -eq 1) {
-        Repair-MsiUserDataCache -ProductCode $product.KeyName -TargetYear $ProductYear
+        # Only ever THIS product's own registered root (ARPINSTALLLOCATION as
+        # harvested into .InstallLocation). Every add-in and content pack in
+        # $targets is an MSI too, and most of them register no location at all;
+        # the repair simply does not run for them rather than inheriting the
+        # core application's folder.
+        Repair-MsiUserDataCache -ProductCode $product.KeyName -InstallRoot $product.InstallLocation
     }
 
     $candidates = @(Get-UninstallCandidates -Product $product)
@@ -1017,6 +1064,9 @@ function Remove-ResidualFiles {
 if ($RemoveResidualFiles -and $failures -gt 0) {
     Write-Log 'Skipping residual cleanup because one or more products failed to uninstall. Re-run after the uninstall succeeds.' 'WARN'
 }
+elseif ($RemoveResidualFiles -and $skipped -gt 0) {
+    Write-Log "Skipping residual cleanup because $skipped product(s) were declined and are still installed. Deleting their files would leave a registered product with no files." 'WARN'
+}
 elseif ($RemoveResidualFiles) {
     Write-Log "Scanning for Revit $ProductYear residual folders..."
     $null = Remove-ResidualFiles -Paths $ResidualPaths
@@ -1025,7 +1075,12 @@ elseif ($RemoveResidualFiles) {
 # --- Summary --------------------------------------------------------------
 Write-Log '---------------------------------------------'
 if ($failures -eq 0) {
-    Write-Log "Completed. Shared Autodesk components were preserved." 'OK'
+    if ($skipped -gt 0) {
+        Write-Log "Completed with $skipped product(s) declined and still installed." 'WARN'
+    }
+    else {
+        Write-Log "Completed. Shared Autodesk components were preserved." 'OK'
+    }
     if ($rebootNeeded) { Write-Log 'A reboot is recommended to finalize removal.' 'WARN' }
 }
 else {

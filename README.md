@@ -1,15 +1,18 @@
-# Revit-Cleaner
+# ADesk_Cleaner
 
-Three PowerShell uninstallers for Autodesk environments on Windows. Each targets a
-different layer of the stack, and each is registry-driven, preview-first, and fully logged.
+Four PowerShell uninstallers for Autodesk environments on Windows, plus a small
+general-purpose cleanup utility. Each uninstaller targets a different layer of the stack, and
+each is registry-driven, preview-first, and fully logged.
 
 | Script | Removes | Elevation |
 |---|---|---|
 | [`Uninstall-Revit.ps1`](Uninstall-Revit.ps1) | **Autodesk Revit**, any year — core application plus its orphaned add-ins, content packs, and exporters | Required (self-elevates) |
 | [`Uninstall-AutoCAD.ps1`](Uninstall-AutoCAD.ps1) | **Autodesk AutoCAD**, any year — the whole per-year product family (ODIS bundle, updates, and the two hidden MSI children) plus orphaned add-ins | Required (self-elevates) |
+| [`Uninstall-Navisworks.ps1`](Uninstall-Navisworks.ps1) | **Autodesk Navisworks** Manage / Simulate / Freedom, any year — the ODIS bundle, the hidden MSI child, and all 11 language packs. **Preserves the NWC exporters by default** | Required (self-elevates) |
 | [`Uninstall-PyRevit-Complete.ps1`](Uninstall-PyRevit-Complete.ps1) | **pyRevit** and **pyRevit CLI** — clones, add-in manifests, Windows installation registrations, Start Menu entries, `PATH` entries | Optional |
+| [`Clean-Directory.ps1`](Clean-Directory.ps1) | Not an uninstaller — a recursive sweep for build junk (`*.bak`, `__pycache__`) under a directory you name | None |
 
-> Both scripts share the same philosophy: discover what is installed from the registry
+> All four uninstallers share the same philosophy: discover what is installed from the registry
 > rather than from hardcoded paths or GUIDs, invoke the vendor's own uninstaller wherever one
 > exists, preview before acting, refuse to touch shared components, and log everything.
 
@@ -19,18 +22,50 @@ different layer of the stack, and each is registry-driven, preview-first, and fu
 |---|---|
 | Removing Revit itself | `Uninstall-Revit.ps1` |
 | Removing AutoCAD itself | `Uninstall-AutoCAD.ps1` |
+| Removing Navisworks itself | `Uninstall-Navisworks.ps1` |
 | Revit uninstall fails with `1603`, `1606`, or `2753` | `Uninstall-Revit.ps1` — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | AutoCAD uninstall fails with `1603` or `2753` | `Uninstall-AutoCAD.ps1` — same automated remediation |
+| Navisworks uninstall fails with `1603` or `2753` | `Uninstall-Navisworks.ps1` — same automated remediation |
 | AutoCAD still listed in Add/Remove Programs after a "successful" uninstall | `Uninstall-AutoCAD.ps1` — it also removes the two hidden MSI children |
+| Navisworks still listed after a "successful" uninstall | `Uninstall-Navisworks.ps1` — the main product MSI has **no uninstall string at all** and is only reachable by product code |
+| Navisworks removed, but Revit/AutoCAD lost their **Export to NWC** command | An earlier sweep took the exporters. See [Reinstalling the exporters](#reinstalling-the-exporters) |
 | A reinstalled AutoCAD came back with the old broken profile | `Uninstall-AutoCAD.ps1 -RemoveResidualRegistry:$true` |
+| A reinstalled Navisworks came back with the old workspace/clash settings | `Uninstall-Navisworks.ps1 -RemoveResidualRegistry:$true` |
 | pyRevit installer reports a **leftover installation folder** | `Uninstall-PyRevit-Complete.ps1` |
 | pyRevit still listed in Add/Remove Programs after deleting its folder | `Uninstall-PyRevit-Complete.ps1` |
 | pyRevit ribbon still loading, or a stale clone needs replacing | `Uninstall-PyRevit-Complete.ps1` |
-| Wiping a machine completely | pyRevit first, then Revit, then AutoCAD |
+| Clearing `*.bak` / `__pycache__` out of a project tree | `Clean-Directory.ps1` |
+| Wiping a machine completely | pyRevit first, then Revit, then Navisworks, then AutoCAD |
 
 Removing pyRevit before Revit lets pyRevit detach from each Revit installation while its CLI
-still exists, which leaves no orphaned add-in manifests behind. AutoCAD goes last because
-Revit and Navisworks consume `RealDWG Shared`, which all three scripts preserve.
+still exists, which leaves no orphaned add-in manifests behind. AutoCAD goes last because both
+Revit and Navisworks consume `RealDWG Shared`, which the three Autodesk uninstallers all
+preserve by name. (`Uninstall-PyRevit-Complete.ps1` has no shared-component logic — it never
+touches anything outside the pyRevit footprint, so it needs none.)
+
+## Exit codes
+
+The three Autodesk uninstallers share one contract:
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `3010` | Success, reboot required |
+| `3` | Partial failure — one or more products did not uninstall |
+| `2` | Nothing matched; no changes made |
+| `1` | Aborted (target application running, elevation cancelled, invalid `-LogPath`) |
+
+A run in which you **declined** products at the prompts also exits `0` — declining is a
+deliberate choice, not a failure, so it does not earn exit `3`. Such a run says so explicitly
+in its last lines (`Completed with N product(s) declined and still installed.`) and skips
+residual cleanup entirely, because deleting the files of a product you chose to keep would
+leave a registered product with no files. If you are driving these scripts from automation,
+use `-Force` so nothing can be declined, and read the transcript rather than the exit code
+alone.
+
+`Uninstall-PyRevit-Complete.ps1` returns `1` only when you decline to close Revit; a
+**NOT CLEAN** verdict is reported in its output rather than in the exit code.
+`Clean-Directory.ps1` returns `1` when `-RootPath` does not exist and `0` otherwise.
 
 ---
 
@@ -272,6 +307,143 @@ Reinstall-safe for the same reasons as the Revit script: products go through Aut
 
 ---
 
+## `Uninstall-Navisworks.ps1` — Autodesk Navisworks
+
+A scoped, self-elevating PowerShell script that cleanly uninstalls **any year and edition of Autodesk Navisworks** (Manage, Simulate, Freedom) on Windows, while preserving the NWC exporters, shared Autodesk components, and every other Autodesk product. The target release is chosen with `-ProductYear` (default `2026`) and the edition with `-Edition` (default `All`).
+
+The whole script is built around one fact that makes Navisworks different from Revit and AutoCAD:
+
+> **`Autodesk Navisworks Exporters <year>` is not part of Navisworks.**
+> It is a separate, licence-free product that installs *into* Revit, AutoCAD and 3ds Max, and it keeps producing NWC files after every Navisworks edition is gone. Autodesk ships it as a standalone download precisely so teams can generate NWC without a licensed Navisworks seat.
+
+A naive "Navisworks + `<year>`" name rule — the rule `Uninstall-Revit.ps1` uses for its own add-ins — sweeps the exporters up with the application and silently kills **Export to NWC** in every Revit, AutoCAD and 3ds Max on the machine. That is the single most likely way an uninstaller of this product causes user-visible damage, so the exporters are excluded from the default scope by an explicit rule and only removed via `-IncludeExporters`.
+
+Three further Navisworks-specific traps this script is built around:
+
+1. **The 11 language packs register `/I`, not `/X`.** Every language pack's `UninstallString` is `MsiExec.exe /I{GUID}` — the *install/repair* verb. Running it verbatim repairs the pack, never uninstalls it, and the run reports success. Verified on this platform: **33 registry rows** carry a `/I` uninstall string. This script synthesizes `/x {ProductCode}` from the registry key name and refuses any harvested `/I` command line it cannot coerce.
+2. **The main product MSI has no uninstall string at all.** Like AutoCAD, each edition registers twice — an ODIS bundle wrapper and a hidden MSI child (`SystemComponent=1`, blank `UninstallString`) — under the *identical* `DisplayName`. The child is a real installed MSI with a cached `LocalPackage`, so `msiexec /x {GUID}` works, but any filter that skips `SystemComponent=1` or blank-`UninstallString` rows skips the actual product. Targets are de-duplicated **by product code**, never by display name.
+3. **The version key is not the year.** Navisworks registers under `...\Autodesk\Navisworks <Edition>\<major>.0`, where `major = year - 2003` (2023 = 20, 2026 = 23). Unlike AutoCAD there are no half-steps — but the mapping is still **read** from the registry rather than computed, and version-scoped cleanup is skipped when it cannot be proven.
+
+### Features
+
+- **Any Navisworks year** via `-ProductYear` and **any edition** via `-Edition` — one script for 2019–2027+.
+- **Exporters preserved by default.** The one destructive mistake this product invites is refused unless you ask for it explicitly.
+- **Registry-driven discovery** across the 64-bit, 32-bit (WOW6432Node), and per-user uninstall hives — no hardcoded product GUIDs.
+- **Finds the hidden MSI child** that carries no uninstall string, and all 11 language packs whose localized names have no consistent separator (Korean has no `" - "` at all, so names are never parsed by splitting).
+- **Coerces the `/I` language-pack trap** to `/X`, and drops the candidate rather than running a repair when it cannot.
+- **Explicit removal order** — updates → language packs → ODIS bundle wrapper → hidden MSI children — with the wrapper identified by its ODIS command line, not by its GUID shape.
+- **Runtime version resolution** (`2026 → 23.0`), proven by reading `Product Name` out of the registry, with the arithmetic kept only as a cross-check. The product token is *discovered* (whichever child key carries `Product Name`) rather than guessed, because it is `NAVMAN-1` for Manage but `exporters-1` for the exporters.
+- **Path-scoped process guard.** `Roamer.exe` is the application (there is no `Navisworks.exe`). Helpers that merely live in the folder — `OptionsEditor`, `AppManager`, `upi`, `senddmp`, `AdPreviewGenerator` — exist in up to 20 copies across AutoCAD, Revit, Desktop Connector and the licensing stack, so they are matched by **full path only**, never by name.
+- **Self-elevation** via UAC with a **fail-closed `-WhatIf` relay**, **preview mode** (`-ListOnly`), and full `-WhatIf` support.
+- **Guarded residual cleanup** of files, and opt-in cleanup of the version-scoped registry keys.
+- **Multi-method resolution** per product, with **per-attempt verbose MSI logs** and automatic `1603`+`2753` remediation (neutralize → recache → retry).
+
+### Requirements
+
+- Windows 10/11
+- Windows PowerShell 5.1 (built in) — no modules required
+- Administrator rights (the script self-elevates via UAC)
+
+### Usage
+
+```powershell
+# Preview only for the default year (2026), all editions — changes nothing:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ListOnly
+
+# Preview a specific year and edition:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2025 -Edition Manage -ListOnly
+
+# Interactive — prompts before each product and each residual folder:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -Edition Manage
+
+# Fully unattended and silent, closing Navisworks if it is open:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2025 -StopNavisworks -Force
+
+# ALSO remove the NWC exporters — this breaks Export to NWC from Revit/AutoCAD/3ds Max:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -IncludeExporters:$true
+
+# Full wipe including the version-scoped profile keys:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -RemoveResidualRegistry:$true -Force
+```
+
+Run `-ListOnly` first. It is the safety gate: it shows the resolved version key, every matched product in removal order, and every residual location before you commit.
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-ProductYear` | string | `2026` | Four-digit Navisworks release year to target. Scopes the core match, residual folders, the residual guard, version resolution, and the self-elevation relaunch. Validated as four digits. |
+| `-Edition` | string | `All` | `All`, `Manage`, `Simulate` or `Freedom`. All three can be installed side by side; non-selected editions are never matched, stopped, or cleaned up. |
+| `-IncludeExporters` | bool | `$false` | **Opt-in, and the one to think about.** Also remove `Autodesk Navisworks Exporters <year>` and its payload inside Revit / AutoCAD / 3ds Max. **This breaks NWC export from those applications** for that exporter year. |
+| `-IncludeCoordinationIssuesAddin` | bool | `$false` | Also remove the ACC/BIM 360 Coordination Issues add-in. It carries no year and its payload spans v18–v24, so it is only removed after a post-uninstall census proves no Navisworks edition of **any** year remains. |
+| `-IncludeMaterialLibraries` | bool | `$false` | Opt in to also removing Material Library packages matching the target year. Off by default because material libraries are shared across products. |
+| `-RemoveResidualFiles` | bool | `$true` | After a fully successful uninstall, delete leftover Navisworks-`<year>` folders (settings, templates, caches, program folder, Start Menu entries, ODIS uninstaller stubs). |
+| `-RemoveResidualRegistry` | bool | `$false` | **Opt-in.** Also delete `HK{LM,CU}:\SOFTWARE\Autodesk\Navisworks <Edition>\<major>.0` and `...\Navisworks API Runtime\<major>\<Edition>`. Only acts when the version mapping was proven, and never touches the parent container key. |
+| `-NeutralizeBrokenCustomActions` | bool | `$true` | On `1603` + `Internal Error 2753`, neutralize the broken custom action in a patched copy of the cached package, recache it (`/fv`), and retry. |
+| `-StopNavisworks` | switch | off | Terminate target-installation Navisworks processes. Other editions and years are identified by path and never touched. Without it, the script aborts when a target process is running. |
+| `-ListOnly` | switch | off | Discover and print matches, then exit. No changes. |
+| `-Force` | switch | off | Fully non-interactive: skips per-item prompts **and** suppresses PowerShell's built-in confirmation. |
+| `-LogPath` | string | `%TEMP%\...` | Override the transcript log path. Resolved to an absolute path before elevation. |
+
+### How it works
+
+**Version resolution.** `HKLM:\SOFTWARE\Autodesk\Navisworks <Edition>\<major>.0` holds one child key carrying a `Product Name` value (`NAVMAN-1` for Manage). The script finds that child by *asking which one has the value* — never by matching the token name, which is inconsistently cased between products — reads the year out of `Product Name`, and cross-checks it against `major + 2003`. On mismatch, or when no key proves the year, version-scoped operations are skipped and logged. `Location\Path` gives the authoritative install root; the fallback is the hidden MSI child's `InstallLocation`, deliberately **not** the ODIS wrapper's, which points at the parent `C:\Program Files\Autodesk` and would path-match every Autodesk product on the machine.
+
+**Product selection.** Core patterns are anchored (`Autodesk Navisworks <Edition> <year>*`) with no leading wildcard, so `Navisworks Exporters` can never match. The single trailing wildcard is what picks up the 11 language packs. Then everything Navisworks-*named* but not Navisworks-*owned* is excluded: the exporters, the Coordination Issues add-in, and all three word orders of the ACC publish add-in (`Publish NWC Addin`, `Publish NWC Addin v1.3`, `NWC Publish Add-in`). Shared components — `RealDWG Shared`, Content Catalog, licensing, ODIS, Autodesk Access, Desktop Connector — are excluded by name as in the sibling scripts.
+
+**Removal order,** with the wrapper identified by its ODIS command line:
+
+1. **Update bundles** — kept as a step for robustness, though on this platform Navisworks updates do **not** register in the uninstall hive at all (they exist only as `%ProgramData%\Autodesk\Uninstallers\<name>` folders). This is a real difference from AutoCAD; do not build the order around finding them.
+2. **Language packs** — MSI children of the core, removed while it still exists.
+3. **ODIS bundle wrapper** — the orchestrator for the edition.
+4. **Hidden MSI children** — normally already gone after step 3, so these usually report `1605` ("not installed"), which counts as success.
+
+Exit codes `0`, `3010` (reboot required), and `1605` (already gone) are treated as success.
+
+### Safety
+
+- **Preview-first** with `-ListOnly` and full `-WhatIf`, and the `-WhatIf` relay **fails closed** at the UAC boundary rather than letting a preview become a real uninstall.
+- **The exporters are refused by default** — by the name rule, by the residual-path guard, and by an explicit check on every candidate path.
+- **`Common Files\Autodesk Shared` is refused outright.** Each `RealDWG Shared <year>` inside it contains `nwcore.dll`, whose file metadata reads *ProductName: Autodesk Navisworks*. Anything matching on the string "Navisworks" inside that tree would select DLLs that Revit, Inventor and Civil 3D depend on.
+- **Other Navisworks editions and years are never touched** — not their products, not their residual folders, not their running processes.
+- **The edition-less cache folders are conditional.** `%APPDATA%\Autodesk\Navisworks <year>` and `%LOCALAPPDATA%\Autodesk\Navisworks <year>` carry no edition token and are created by *any* year-`N` component **including the exporters** — verified on a machine with no Navisworks 2023 application but with Exporters 2023 installed. They are only claimed when the exporters for that year are going too.
+- **A process with no resolvable path is never killed** unless its name is one of the four executables verified unique to the application (`Roamer`, `FileToolsGUI`, `FileTools2GUI`, `FiletoolsTaskRunner`). Everything else is reported instead.
+- **Residual cleanup is gated** on a fully successful uninstall — and, unlike a straight port of the sibling scripts, also on **nothing having been declined**. A product you answered "No" to is still installed, so deleting its files would leave a registered product with no files.
+- **Authored content is called out by name.** `%APPDATA%\Autodesk\Navisworks <Edition> <year>` holds custom clash tests, property sets, appearance profiles, avatars and workspaces that no reinstall recreates. The prompt says so rather than calling it a "residual folder".
+- **Residual registry cleanup is opt-in and doubly gated** — the version must have been proven from the registry, the key path must match a version-leaf shape exactly, and the exporters' keys are refused even if they somehow reach the guard.
+
+### Logging
+
+Every run writes a full transcript to `%TEMP%\Uninstall-Navisworks<year>_<timestamp>.log`. Each MSI attempt additionally writes its own verbose Windows Installer log to `%TEMP%\MSIVerbose_<guid>_<stamp>_<Kind>.log`. Attach these logs when reporting issues.
+
+### Troubleshooting
+
+Stuck on exit `1603` or Internal Error `2753`? The same automated chain the Revit and AutoCAD scripts use applies here — neutralize → recache → retry. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for the full error-code map and the manual fallback routes.
+
+### Reinstalling the exporters
+
+If NWC export disappeared from Revit / AutoCAD / 3ds Max, the exporters were removed — either by `-IncludeExporters:$true` here, or by an earlier tool using a blanket "Navisworks" rule. They are **not** restored by reinstalling Navisworks itself, because they are a separate product.
+
+Reinstall the free **NWC Export Utility** for the matching year from your Autodesk account. Note the exporter year tracks the *Navisworks* release, not the host application: a Revit 2026 user may deliberately keep Exporters 2023 installed to produce NWC files a 2023-era Navisworks can read, which is why removing exporters for one year can break a workflow that has nothing to do with the edition being removed.
+
+### Reinstalling Navisworks later
+
+Reinstall-safe for the same reasons as the sibling scripts: products go through Autodesk's own uninstallers, so registrations are cleared rather than force-deleted, and the Autodesk installer framework (ODIS / Autodesk Access), Genuine Service, licensing and shared libraries are preserved. Reboot first, then install through Autodesk Access.
+
+`-RemoveResidualRegistry` is the switch to use when a *previous* Navisworks install left a corrupt profile that a reinstall keeps resurrecting — that state lives in `...\Autodesk\Navisworks <Edition>\<major>.0`, not in the program folder.
+
+### Notes and limitations
+
+- The ODIS bundle uninstall can take several minutes; it removes each sub-component MSI in sequence.
+- The hidden MSI child is expected to report `1605` when reached — that means the ODIS wrapper already removed it, and it is treated as success.
+- **Per-user residuals are cleaned for the elevated account only.** If UAC asked for admin *credentials* rather than consent, the elevated child runs as the administrator and `%APPDATA%` is that profile — the signed-in user keeps their Navisworks settings. The script detects this and says so; re-run from the affected account to clear it.
+- `Navisworks Simulate` and `Navisworks Freedom` matching is derived from the verified Manage/Exporters pattern rather than from a live install of those editions. The product-token key is discovered rather than assumed specifically so this cannot bite.
+- Display names are verified for 2023–2027. Pre-2023 word order could not be confirmed, so the matcher also accepts the reversed `Navisworks <year> <Edition>` form.
+- The directory-property override kept as the last `msiexec` attempt is a generic last resort here, not a targeted fix: the Navisworks packages inspected do not carry the `DIRCA_INSTALLDIR` action that made it the specific remedy on Revit.
+- This tool is not affiliated with or endorsed by Autodesk. "Navisworks", "Revit", and "AutoCAD" are trademarks of Autodesk, Inc.
+
+---
+
 ## `Uninstall-PyRevit-Complete.ps1` — pyRevit and pyRevit CLI
 
 Fully removes **pyRevit** and **pyRevit CLI** — clones, engines, Revit add-in manifests,
@@ -508,6 +680,65 @@ Syntax-checked with the PowerShell 5.1 parser, then run end to end against a liv
 Reinstalling after a CLEAN verdict was not itself re-tested — but the orphaned registration
 that triggers the installer's leftover warning is verifiably gone, which is the condition the
 warning checks.
+
+---
+
+## `Clean-Directory.ps1` — build-junk sweeper
+
+Not an uninstaller and not Autodesk-specific. A small recursive sweep that finds and deletes
+build junk under a directory you name — currently `*.bak` files and `__pycache__` folders.
+
+It follows the same preview-first shape as the uninstallers, at a much smaller scale: it lists
+every match with its full path, then requires you to type `YES` in full before deleting
+anything. There is no elevation, no registry access, and no vendor uninstaller involved.
+
+### Usage
+
+```powershell
+# Preview only — lists every match, deletes nothing:
+powershell -ExecutionPolicy Bypass -File .\Clean-Directory.ps1 -RootPath "C:\Projects" -WhatIf
+
+# Real run — lists matches, then requires typing YES:
+powershell -ExecutionPolicy Bypass -File .\Clean-Directory.ps1 -RootPath "C:\Projects"
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-RootPath` | string | *(required)* | The top-level directory to scan recursively. The script exits `1` if it does not exist. |
+| `-WhatIf` | switch | off | List what would be deleted and exit without deleting. A plain switch, not the PowerShell common parameter. |
+
+To sweep other patterns, edit the two arrays at the top of the script:
+
+```powershell
+$FilePatterns   = @("*.bak")
+$FolderPatterns = @("__pycache__")
+```
+
+### Notes and limitations
+
+- Deletion is **permanent** — items do not go to the Recycle Bin.
+- The confirmation is a literal `YES`; anything else aborts with nothing deleted.
+- Per-item failures (locked files, denied ACLs) are collected and reported at the end rather
+  than stopping the run — but the script still exits `0` in that case, so check the printed
+  error list rather than the exit code.
+- There is no path guard beyond `-RootPath` having to exist. Unlike the uninstallers, this
+  script will happily accept a drive root, so read the `-WhatIf` output before committing.
+
+---
+
+## Reference documentation
+
+[`Revit_Uninstall_Reference.md`](Revit_Uninstall_Reference.md) is the working teardown reference
+behind `Uninstall-Revit.ps1`: the twelve lessons that cost real debugging cycles (ODIS command
+quoting, StrictMode traps, MSI maintenance mode always running from the registered cache, the
+PowerShell 5.1 Windows Installer COM traps), the product-selection rule, the captured product
+codes from a verified removal, and the error-1606 / error-2753 root-cause analysis. Most of it
+generalizes to the AutoCAD and Navisworks scripts, which reuse the same MSI machinery.
+
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md) is the operator-facing companion: the error-code map
+and the manual fallback routes when the automated remediation cannot proceed.
 
 ---
 

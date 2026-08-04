@@ -6,10 +6,12 @@ Derived from a verified Revit 2026 removal on machine `ICECREAMASSASIN`
 (2026-07-17), then generalized to any year. The delivered script is
 `Uninstall-Revit.ps1` (PowerShell 5.1 compatible, self-elevating,
 year-parameterized via `-ProductYear`, default 2026). Published to GitHub with
-an MIT LICENSE and a README (author: MrGezz). Current revision: 2026-07-24
-(MSI-LocalPackage + MSI-PropsOverride resolution, 1606 root-cause fix, rebuilt
-self-elevation, automated 2753 neutralize→recache→retry — see lessons 7–12 and
-the troubleshooting section).
+an MIT LICENSE and a README (author: MrGezz). Current revision: 2026-08-04
+(StrictMode null-object guard in `Get-Prop` — lesson 2b; repo renamed to
+`ADesk_Cleaner` and grown to four uninstallers plus a utility script). Prior
+revision 2026-07-24 (MSI-LocalPackage + MSI-PropsOverride resolution, 1606
+root-cause fix, rebuilt self-elevation, automated 2753 neutralize→recache→retry
+— see lessons 7–12 and the troubleshooting section).
 
 ## What worked
 
@@ -29,11 +31,29 @@ were preserved, and AutoCAD/Navisworks 2026 (separate apps) were untouched.
    quotes the path correctly. Split unquoted command lines on the first `.exe`
    token so spaced paths survive.
 
-2. **Under `Set-StrictMode -Version Latest`, do not pipe an absent property to
-   `ForEach-Object`.** `$obj.PSObject.Properties['X'] | ForEach-Object { $obj.X }`
-   still runs the block once with `$null` when the value is absent, then throws
-   `PropertyNotFoundStrict`. Use a guarded accessor instead:
-   `$p = $obj.PSObject.Properties[$Name]; if ($p) { $p.Value } else { $null }`.
+2. **Under `Set-StrictMode -Version Latest`, guard BOTH the absent property and
+   the absent OBJECT.** Two distinct failures wear the same
+   `PropertyNotFoundStrict` error text, and fixing one does not fix the other.
+
+   *(a) Absent property.* `$obj.PSObject.Properties['X'] | ForEach-Object { $obj.X }`
+   still runs the block once with `$null` when the value is absent, then throws.
+   Use a guarded accessor: `$p = $obj.PSObject.Properties[$Name]; if ($p) { $p.Value } else { $null }`.
+
+   *(b) Absent object — found the hard way on 2026-08-04.* `Get-ItemProperty`
+   against a registry key that carries **zero values** returns `$null` *without
+   throwing*, so a `try { ... } catch { }` around it does not fire and `$null`
+   flows onward. The very next `$obj.PSObject.Properties[...]` then dereferences
+   `$null` and dies with
+   `The property 'Properties' cannot be found on this object`, aborting the
+   entire hive enumeration on the first valueless subkey. Fix:
+   `if ($null -eq $Obj) { return $null }` **before** the lookup, not after.
+
+   Valueless container keys are normal, not corruption — `...\AutoCAD\R25.1\ACAD-9101`
+   and `...\InstalledProducts` are two, and orphaned `Uninstall` subkeys are
+   another. Whether the bug fires is pure machine state, which is why
+   `Uninstall-AutoCAD.ps1` hit it early (its release walk reads container keys
+   by design) while `Uninstall-Revit.ps1` survived many clean runs before a
+   valueless `Uninstall` subkey finally appeared.
 
 3. **Gate residual-file cleanup on uninstall success.** An early version deleted
    `C:\Program Files\Autodesk\Revit 2026` and the per-user settings folders even
@@ -154,7 +174,16 @@ were preserved, and AutoCAD/Navisworks 2026 (separate apps) were untouched.
 - **RealDWG is not AutoCAD's.** `Autodesk RealDWG Shared <year>` is the
   redistributable DWG read/write engine for *non-AutoCAD* apps (Revit, Navisworks,
   Civil 3D...). AutoCAD uses its own core and does not need it. Keep it while any
-  non-AutoCAD DWG consumer of that year remains (e.g. Navisworks 2026).
+  non-AutoCAD DWG consumer of that year remains (e.g. Navisworks 2026). All three
+  Autodesk uninstallers exclude it by name for this reason — Navisworks Manage
+  ships only `Loaders\dbx\lclddwg.dll` and no `acdb*.dll` of its own, so its DWG
+  support really is RealDWG's.
+- **Do not match on the string "Navisworks" inside
+  `Common Files\Autodesk Shared`.** Each `RealDWG Shared <year>` there contains
+  `nwcore.dll`, whose VersionInfo reads *ProductName: Autodesk Navisworks*. A
+  name- or metadata-based sweep would select those three DLLs and break RealDWG
+  for Revit, Inventor and Civil 3D. `Uninstall-Navisworks.ps1` refuses that whole
+  tree by path before any name rule runs.
 - **Note:** a product GUID may coincidentally contain the year digits (e.g.
   `{05BC6921-2026-49D7-...}`); this is harmless because matching is by display
   name, not by GUID. De-dupe msiexec candidates by extracted GUID (case- and
@@ -322,6 +351,16 @@ script bug. Codes seen in practice:
   Machine state also drifts: a product that returned 2753 one day can return
   plain 1606 later; always diagnose from the *newest* `MSIVerbose_*_<Kind>.log`.
 
+> **False friend.** The "Navisworks 2023 exporters" in the next paragraph are
+> *Revit add-ins* — the NWC exporter payload installed into Revit — swept by the
+> Revit script's `\bNavisworks\b.*?\bExport` rule. They are not the Navisworks
+> product family, and this file contains no coverage of uninstalling Navisworks
+> itself; that lives in `Uninstall-Navisworks.ps1` and its README chapter. Note
+> the two scripts take deliberately opposite defaults here: the Revit script
+> removes Revit-year exporter add-ins as orphaned content, while the Navisworks
+> script preserves the exporter *product* by default because it keeps working
+> without Navisworks.
+
 Verified case: `-ProductYear 2023` on ICECREAMASSASIN (2026-07-23) removed all 12
 Navisworks 2023 exporters cleanly but `Revit 2023` core kept failing 1603
 (earlier in the day as 2753; by the final runs as pure 1606 at CostFinalize —
@@ -348,11 +387,30 @@ before the COM try/finally blocks; `Repair-MsiUserDataCache` reuses
 
 ## Repo
 
-Lives at `C:\Users\IceCreamAssasin\source\repos\Revit-Cleaner` (git). Files:
-`Uninstall-Revit.ps1`, `README.md`, `LICENSE` (MIT), `TROUBLESHOOTING.md`, and
-this reference (`Revit_Uninstall_Reference.md`). User handles git commits manually. The old
-`Uninstall-Revit2026.ps1` was renamed to `Uninstall-Revit.ps1`
-(`git rm`/`git mv` the stale name).
+Lives at `C:\Users\Azdi Asmar\Documents\GitHub\ADesk_Cleaner` (git), renamed from
+`Revit-Cleaner` once it stopped being Revit-only. Tracked files:
+
+| File | Role |
+|---|---|
+| `Uninstall-Revit.ps1` | Revit uninstaller — the origin of the MSI machinery documented here |
+| `Uninstall-AutoCAD.ps1` | AutoCAD uninstaller — same machinery, plus release resolution and the toolset guard |
+| `Uninstall-Navisworks.ps1` | Navisworks uninstaller — same machinery, plus the exporter carve-out and the `/I` language-pack fix |
+| `Uninstall-PyRevit-Complete.ps1` | pyRevit / pyRevit CLI — Inno Setup, not MSI; none of this reference applies |
+| `Clean-Directory.ps1` | Generic build-junk sweeper; unrelated to Autodesk |
+| `README.md` | Per-script documentation |
+| `TROUBLESHOOTING.md` | Operator-facing error-code map for all three Autodesk uninstallers |
+| `Revit_Uninstall_Reference.md` | This file |
+| `.gitattributes` | CRLF policy and linguist hints |
+| `LICENSE` | MIT |
+
+The user handles git commits manually.
+
+**Scope note.** This reference is Revit-specific by title and content, and the
+AutoCAD and Navisworks scripts deliberately did not each get one — their
+product-specific findings live in their `README.md` chapters and in their own
+`.DESCRIPTION` blocks. What generalizes across all three is everything in
+"Twelve lessons" and the resolution order below; what does not is the
+product-selection rule and the captured identifiers.
 
 ## Targeting another year
 

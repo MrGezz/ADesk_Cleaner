@@ -1,18 +1,40 @@
 # Troubleshooting stubborn Autodesk uninstalls
 
-Companion to `Uninstall-Revit.ps1`. When a product refuses to uninstall, the
-cause is almost always damaged Windows Installer state on the machine, not the
-script. This covers the error codes seen in practice and how to clear them.
+Companion to the three Autodesk uninstallers — `Uninstall-Revit.ps1`,
+`Uninstall-AutoCAD.ps1` and `Uninstall-Navisworks.ps1` — which share the same
+MSI machinery and the same automated remediation chain. When a product refuses
+to uninstall, the cause is almost always damaged Windows Installer state on the
+machine, not the script. This covers the error codes seen in practice and how to
+clear them.
+
+Throughout, `<Product>` stands for `Revit`, `AutoCAD` or `Navisworks`, and the
+stop switch is `-StopRevit`, `-StopAutoCAD` or `-StopNavisworks` respectively.
 
 ## Quick map
+
+### Windows Installer codes
 
 | Exit / error | Meaning | What to do |
 |---|---|---|
 | `1605` | "This action is only valid for a product that is installed" — already gone | Treated as success by the script; nothing to do |
 | `3010` | Success, reboot required | Reboot; the removal is complete |
 | `1618` | Another install/uninstall is already running | Wait for it (or reboot), then retry |
+| `1619` | Package could not be opened | Almost always a path problem, not a corrupt package: a leading-space or relative path reaching `msiexec`, or a `.msi` still held open by an unreleased COM wrapper in the calling process (`0x80030020 STG_E_SHAREVIOLATION`). Both are handled in-script; if it appears, read the newest verbose log |
 | `1606` | "Could not access network location …" | Either the MSI's own `DIRCA_INSTALLDIR` composing a relative `INSTALLDIR` (fixed automatically by the `MSI-PropsOverride` attempt) or a broken shell-folder registry value — see below |
 | `1603` + Internal Error `2753` | Damaged MSI registration: a custom action sourced from an installed file cannot be resolved | Auto-remediated by the script (neutralize → recache → retry); MS troubleshooter is the manual fallback — see below |
+
+### The scripts' own exit codes
+
+These come from the script, not from `msiexec`, and are what automation should
+branch on.
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `3010` | Success, reboot required |
+| `3` | Partial failure — one or more products did not uninstall |
+| `2` | Nothing matched; no changes made |
+| `1` | Aborted (target application running, elevation cancelled, invalid `-LogPath`) |
 
 ## Error 1603 with Internal Error 2753 (the hard one)
 
@@ -28,15 +50,17 @@ log), so no command-line variation changes the tables being executed.
 
 ### Fix A (automated): the script's neutralize → recache → retry chain
 
-`Uninstall-Revit.ps1` (`-NeutralizeBrokenCustomActions`, default on) resolves
-this without force-removal, verified end-to-end on the Revit 2023 core
-(2026-07-24):
+All three Autodesk uninstallers implement this chain
+(`-NeutralizeBrokenCustomActions`, default on) and resolve it without
+force-removal. Verified end-to-end on the Revit 2023 core (2026-07-24):
 
 1. Detects `Error 2753` in the failed attempt's verbose log and extracts the
    failing action name.
 2. Copies the cached package to
-   `%TEMP%\RevitCleanerPatch_<stamp>\<registered name>.msi` — the exact
-   registered file name matters: repair source resolution probes
+   `%TEMP%\<Product>CleanerPatch_<stamp>\<registered name>.msi` — each script
+   uses its own staging folder (`RevitCleanerPatch_`, `AutoCadCleanerPatch_`,
+   `NavisCleanerPatch_`), but the exact registered *file* name inside it
+   matters: repair source resolution probes
    `SOURCEDIR + <registered PackageName>` and fails 2203/1316 otherwise. A
    pristine backup (`<name>_pristine_<stamp>.msi`) is saved alongside.
 3. Sets the broken action's `InstallExecuteSequence` `Condition` to `'0'` in
@@ -63,8 +87,10 @@ cleanup, but effective when the automated chain cannot proceed.
    listed, choose it by **product code** — for the 2023 core that is
    `{7346B4A0-2300-0510-0000-705C0D862004}`.
 4. Let it remove the registration and clean the broken cache entry.
-5. **Re-run the script** for that year, e.g.
-   `powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2023 -StopRevit -Force`.
+5. **Re-run the matching script** for that year, e.g.
+   `powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2023 -StopRevit -Force`
+   (or `.\Uninstall-AutoCAD.ps1 ... -StopAutoCAD -Force`, or
+   `.\Uninstall-Navisworks.ps1 ... -StopNavisworks -Force`).
    The core now reports `1605` ("already gone") → success, so the run completes
    and residual cleanup finally proceeds.
 
@@ -157,13 +183,56 @@ a `{GUID}`) whose data points to a drive/UNC path that no longer exists or is
 empty, and restore it to the correct local path (e.g. `Personal` →
 `%USERPROFILE%\Documents`). Sign out/in afterward.
 
+## Navisworks: a "successful" uninstall that removed nothing
+
+Specific to `Uninstall-Navisworks.ps1`, and the reason it does not simply reuse
+the Revit candidate builder.
+
+Every Navisworks language pack — 11 per product — registers its uninstall
+command as:
+
+```
+UninstallString = MsiExec.exe /I{GUID}
+```
+
+`/I` is the **install/repair** verb, not `/X`. A script that runs the registered
+`UninstallString` verbatim therefore *repairs* each language pack, `msiexec`
+returns `0`, and the run reports success while every pack remains installed.
+Measured on a machine with Navisworks Manage 2026 plus Exporters 2023 and 2026:
+**33 registry rows carry a `/I` uninstall string.**
+
+`Uninstall-Navisworks.ps1` coerces `/I{GUID}` → `/X{GUID}`, and drops the
+candidate entirely if the coercion cannot be anchored on a GUID — the MSI branch
+has already synthesized a correct `/x {ProductCode}` from the registry key name,
+which is the reliable route.
+
+Two related shapes worth recognizing in the log:
+
+- **The main product MSI has no `UninstallString` at all** (`SystemComponent=1`,
+  blank uninstall string). It is still a real installed MSI with a cached
+  `LocalPackage`, so `msiexec /x {ProductCode}` works. Any tool that filters out
+  `SystemComponent=1` rows will skip the actual product and report nothing to do.
+- **Two rows share the identical `DisplayName`** — the ODIS bundle wrapper and
+  the hidden MSI child are both called `Autodesk Navisworks Manage <year>`, with
+  different product codes and different `DisplayVersion` shapes (the wrapper's
+  is the compressed form, `23.2.144496`, with the last dot dropped). This is
+  expected, not duplication. De-duplicate by product code; never by name or
+  version.
+
+If **Export to NWC** vanished from Revit / AutoCAD / 3ds Max after a Navisworks
+uninstall, the exporters were removed — they are a separate product and are not
+restored by reinstalling Navisworks. Reinstall the free NWC Export Utility for
+the matching year.
+
 ## General order of operations
 
 1. Run `-ListOnly` to confirm scope.
-2. Run the uninstall (`-StopRevit -Force`).
-3. If a product fails, read the transcript `%TEMP%\Uninstall-Revit<year>_*.log`
-   (the script prints the raw uninstall strings for any failure) and the
-   per-attempt verbose logs `%TEMP%\MSIVerbose_<guid>_<stamp>_<Kind>.log`.
+2. Run the uninstall (`-StopRevit` / `-StopAutoCAD` / `-StopNavisworks`, plus
+   `-Force`).
+3. If a product fails, read the transcript
+   `%TEMP%\Uninstall-<Product><year>_*.log` (the script prints the raw uninstall
+   strings for any failure) and the per-attempt verbose logs
+   `%TEMP%\MSIVerbose_<guid>_<stamp>_<Kind>.log`.
 4. `1606` → Cause A is handled automatically by the `MSI-PropsOverride`
    attempt; for Cause B, fix the shell-folder values for a permanent cure.
 5. `1603` / `2753` → Microsoft Program Install and Uninstall Troubleshooter, then

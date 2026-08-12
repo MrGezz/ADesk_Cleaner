@@ -35,17 +35,25 @@
     Also remove every product whose name references Revit and the target year
     - add-ins, content packs, exporters, DB Link, IFC, interop tools, etc. -
     which are orphaned once the core application is gone. Default: $true.
-    Disable with -IncludeAddins:$false. Cross-version and shared components
-    (Content Catalog year-range packs, RealDWG, version-neutral interop
-    managers, material libraries, licensing) are always preserved.
+    Disable with -IncludeAddins:$false, which needs the -Command form (see
+    .NOTES). Cross-version and shared components (Content Catalog year-range
+    packs, RealDWG, version-neutral interop managers, material libraries,
+    licensing) are always preserved.
+
+.PARAMETER IncludeMaterialLibraries
+    Opt in to also remove Material Library packages matching the target year.
+    Off by default because material libraries are shared across Autodesk
+    products. This is a [switch]: pass it bare, like -Force, not as
+    -IncludeMaterialLibraries:$true.
 
 .PARAMETER RemoveResidualFiles
     After a successful uninstall, delete leftover Revit <year>-specific folders
     (per-user settings/journals, add-in manifests, RVT content/templates, and
     any residual Revit <year> program folder). Default: $true. Disable with
-    -RemoveResidualFiles:$false. A runtime guard only permits deletion of paths
-    under an Autodesk tree that reference Revit/RVT and the target year; shared
-    Autodesk trees are never removed.
+    -RemoveResidualFiles:$false, which needs the -Command form (see .NOTES). A
+    runtime guard only permits deletion of paths under an Autodesk tree that
+    reference Revit/RVT and the target year; shared Autodesk trees are never
+    removed.
 
 .PARAMETER NeutralizeBrokenCustomActions
     When an MSI uninstall attempt exits 1603 and its verbose log shows
@@ -57,7 +65,8 @@
     there even elevated). Surgical alternative to the Microsoft Program
     Install and Uninstall Troubleshooter: the rest of the uninstall still runs
     normally with full component cleanup and rollback.
-    Default: $true. Disable with -NeutralizeBrokenCustomActions:$false.
+    Default: $true. Disable with -NeutralizeBrokenCustomActions:$false, which
+    needs the -Command form (see .NOTES).
 
 .PARAMETER StopRevit
     If Revit.exe is running, terminate it before uninstalling. Without this
@@ -89,21 +98,43 @@
     powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2025 -StopRevit -Force
 
 .EXAMPLE
-    # Core product only (skip add-ins and residual cleanup):
-    powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false
+    # Also remove the year's Material Library packages (opt-in, bare switch):
+    powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2026 -IncludeMaterialLibraries
+
+.EXAMPLE
+    # Turning OFF one of the [bool] parameters needs -Command, not -File.
+    # powershell.exe -File passes every argument as a literal string, and a
+    # [bool] parameter rejects the string "$false" outright. Measured: no -File
+    # form works - not :$false, not :0. This is the only shape that binds:
+    powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-Revit.ps1' -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false"
 
 .NOTES
     Requires an elevated (Administrator) session; the script self-elevates.
     Exit code 0 = success, 3010 = success (reboot required), 3 = partial failure,
     2 = nothing found, 1 = aborted.
+
+    -IncludeMaterialLibraries is [switch] rather than [bool] specifically so that
+    it binds under "powershell.exe -File", which is how every example in this
+    repo is written. Pass it bare - "-Force" style - not as
+    "-IncludeMaterialLibraries:$true".
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [ValidatePattern('^\d{4}$')]
     [string]$ProductYear       = '2026',
+    # These three stay [bool] because they default ON and are only ever passed
+    # to turn a removal OFF, which is rare. Doing so needs the -Command form -
+    # see the .NOTES block.
     [bool]$IncludeAddins       = $true,
-    [bool]$IncludeMaterialLibraries = $false,
+    # The OPT-IN is [switch], not [bool], and that is deliberate:
+    # "powershell.exe -File" passes every argument as a literal STRING, and a
+    # [bool] parameter's argument transformation rejects the string "$true" with
+    # "Boolean parameters accept only Boolean values and numbers". Measured: NO
+    # -File form binds a [bool] - not :$true, not :1, not :0, not :true. Since
+    # this is a parameter an operator actually types, it must work with the
+    # -File invocation every example in this repo uses.
+    [switch]$IncludeMaterialLibraries,
     [bool]$RemoveResidualFiles = $true,
     [bool]$NeutralizeBrokenCustomActions = $true,
     [switch]$StopRevit,
@@ -203,9 +234,9 @@ if (-not (Test-IsAdministrator)) {
     $passArgs = @()
     $passArgs += ('-ProductYear {0}'         -f $ProductYear)
     $passArgs += ('-IncludeAddins:${0}'      -f $IncludeAddins)
-    $passArgs += ('-IncludeMaterialLibraries:${0}' -f $IncludeMaterialLibraries)
     $passArgs += ('-RemoveResidualFiles:${0}' -f $RemoveResidualFiles)
     $passArgs += ('-NeutralizeBrokenCustomActions:${0}' -f $NeutralizeBrokenCustomActions)
+    if ($IncludeMaterialLibraries) { $passArgs += '-IncludeMaterialLibraries' }
     if ($StopRevit) { $passArgs += '-StopRevit' }
     if ($ListOnly)  { $passArgs += '-ListOnly' }
     if ($Force)     { $passArgs += '-Force' }
@@ -342,7 +373,7 @@ $targets = @(
         $isCore -or $isRevitYear -or $isMaterialYear
     } |
     Where-Object { -not (Test-MatchesAny -Value $_.DisplayName -Patterns $SharedExclusions) } |
-    Where-Object { $_.DisplayName -notmatch '\d{4}\s*[-–]\s*\d{4}' } |
+    Where-Object { $_.DisplayName -notmatch '\d{4}\s*[-\u2013]\s*\d{4}' } |
     Sort-Object DisplayName -Unique
 )
 

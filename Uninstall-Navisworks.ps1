@@ -72,47 +72,55 @@
 
 .PARAMETER IncludeExporters
     ALSO remove "Autodesk Navisworks Exporters <year>" and its payload inside
-    Revit / AutoCAD / 3ds Max. Default: $false, and deliberately so - see the
+    Revit / AutoCAD / 3ds Max. Off by default, and deliberately so - see the
     description. Turning this on BREAKS NWC EXPORT from those applications for
     that exporter year, which is a separate concern from whether Navisworks
     itself is installed. Note the exporter year tracks the NAVISWORKS release,
     not the host application: "Exporters 2023" is routinely kept on a machine
     with no Navisworks 2023 at all, to produce NWC files a 2023-era Navisworks
-    can read.
+    can read. This is a [switch]: pass it bare, like -Force, not as
+    -IncludeExporters:$true.
 
 .PARAMETER IncludeCoordinationIssuesAddin
     Also remove "Autodesk Navisworks Coordination Issues Add-In" (the ACC/BIM
-    360 issues plugin). Default: $false. It carries NO year in its name and is
+    360 issues plugin). Off by default. It carries NO year in its name and is
     genuinely cross-version - its payload folder holds v18 through v24 - so it
     is still in use while any other Navisworks year remains. When this is
     enabled the script re-censuses the machine after the uninstall and removes
-    the add-in ONLY if no Navisworks edition of any year survives.
+    the add-in ONLY if no Navisworks edition of any year survives. This is a
+    [switch]: pass it bare, like -Force, not as
+    -IncludeCoordinationIssuesAddin:$true.
 
 .PARAMETER IncludeMaterialLibraries
     Opt in to also removing Material Library packages matching the target year.
-    Off by default because material libraries are shared across products.
+    Off by default because material libraries are shared across products. This
+    is a [switch]: pass it bare, like -Force, not as
+    -IncludeMaterialLibraries:$true.
 
 .PARAMETER RemoveResidualFiles
     After a fully successful uninstall, delete leftover Navisworks <year>
     folders (per-user settings, machine-wide templates, caches, the program
     folder, Start Menu entries and the ODIS uninstaller stubs). Default: $true.
-    A runtime guard only permits deletion of paths under an Autodesk tree that
-    reference Navisworks and the target year, and refuses the shared
+    Disable with -RemoveResidualFiles:$false, which needs the -Command form (see
+    .NOTES). A runtime guard only permits deletion of paths under an Autodesk
+    tree that reference Navisworks and the target year, and refuses the shared
     Common Files\Autodesk Shared tree outright.
 
 .PARAMETER RemoveResidualRegistry
     Opt-in. Also delete the version-scoped keys
     HK{LM,CU}:\SOFTWARE\Autodesk\Navisworks <Edition>\<major>.0 and
     HKLM:\SOFTWARE\Autodesk\Navisworks API Runtime\<major>\<Edition>.
-    Default: $false. Only acts when the year-to-version mapping was PROVEN from
+    Off by default. Only acts when the year-to-version mapping was PROVEN from
     the registry, and never touches the parent container key (which other
-    Navisworks years and the Exporters register under).
+    Navisworks years and the Exporters register under). This is a [switch]: pass
+    it bare, like -Force, not as -RemoveResidualRegistry:$true.
 
 .PARAMETER NeutralizeBrokenCustomActions
     When an MSI uninstall attempt exits 1603 and its verbose log shows
     "Internal Error 2753", copy the cached package to %TEMP%, condition the
     named action out ('0' = never run) in the COPY, recache it with /fv and
-    retry. Default: $true. See TROUBLESHOOTING.md.
+    retry. Default: $true. Disable with -NeutralizeBrokenCustomActions:$false,
+    which needs the -Command form (see .NOTES). See TROUBLESHOOTING.md.
 
 .PARAMETER StopNavisworks
     If a Navisworks process belonging to the TARGET installation is running,
@@ -145,16 +153,29 @@
 
 .EXAMPLE
     # Also remove the NWC exporters - this breaks NWC export from Revit/AutoCAD/3ds Max:
-    powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -IncludeExporters:$true
+    powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -IncludeExporters
 
 .EXAMPLE
-    # Full wipe including the version-scoped profile keys:
-    powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -RemoveResidualRegistry:$true -Force
+    # Full wipe including the version-scoped profile keys (opt-in, bare switch):
+    powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -RemoveResidualRegistry -Force
+
+.EXAMPLE
+    # Turning OFF one of the [bool] parameters needs -Command, not -File.
+    # powershell.exe -File passes every argument as a literal string, and a
+    # [bool] parameter rejects the string "$false" outright. Measured: no -File
+    # form works - not :$false, not :0. This is the only shape that binds:
+    powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-Navisworks.ps1' -ProductYear 2026 -RemoveResidualFiles:$false"
 
 .NOTES
     Requires an elevated (Administrator) session; the script self-elevates.
     Exit code 0 = success, 3010 = success (reboot required), 3 = partial failure,
     2 = nothing found, 1 = aborted.
+
+    -IncludeExporters, -IncludeCoordinationIssuesAddin, -IncludeMaterialLibraries
+    and -RemoveResidualRegistry are [switch] rather than [bool] specifically so
+    that they bind under "powershell.exe -File", which is how every example in
+    this repo is written. Pass them bare - "-Force" style - not as
+    "-IncludeExporters:$true".
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
@@ -163,11 +184,21 @@ param(
     [string]$ProductYear       = '2026',
     [ValidateSet('All', 'Manage', 'Simulate', 'Freedom')]
     [string]$Edition           = 'All',
-    [bool]$IncludeExporters    = $false,
-    [bool]$IncludeCoordinationIssuesAddin = $false,
-    [bool]$IncludeMaterialLibraries = $false,
+    # The OPT-INS are [switch], not [bool], and that is deliberate:
+    # "powershell.exe -File" passes every argument as a literal STRING, and a
+    # [bool] parameter's argument transformation rejects the string "$true" with
+    # "Boolean parameters accept only Boolean values and numbers". Measured: NO
+    # -File form binds a [bool] - not :$true, not :1, not :0, not :true. Since
+    # these are the parameters an operator actually types, they must work with
+    # the -File invocation every example in this repo uses.
+    [switch]$IncludeExporters,
+    [switch]$IncludeCoordinationIssuesAddin,
+    [switch]$IncludeMaterialLibraries,
+    # These two stay [bool] because they default ON and are only ever passed to
+    # turn a removal OFF, which is rare. Doing so needs the -Command form - see
+    # the .NOTES block.
     [bool]$RemoveResidualFiles = $true,
-    [bool]$RemoveResidualRegistry = $false,
+    [switch]$RemoveResidualRegistry,
     [bool]$NeutralizeBrokenCustomActions = $true,
     [switch]$StopNavisworks,
     [switch]$ListOnly,
@@ -349,12 +380,12 @@ if (-not (Test-IsAdministrator)) {
     $passArgs = @()
     $passArgs += ('-ProductYear {0}'      -f $ProductYear)
     $passArgs += ('-Edition {0}'          -f $Edition)
-    $passArgs += ('-IncludeExporters:${0}' -f $IncludeExporters)
-    $passArgs += ('-IncludeCoordinationIssuesAddin:${0}' -f $IncludeCoordinationIssuesAddin)
-    $passArgs += ('-IncludeMaterialLibraries:${0}' -f $IncludeMaterialLibraries)
     $passArgs += ('-RemoveResidualFiles:${0}' -f $RemoveResidualFiles)
-    $passArgs += ('-RemoveResidualRegistry:${0}' -f $RemoveResidualRegistry)
     $passArgs += ('-NeutralizeBrokenCustomActions:${0}' -f $NeutralizeBrokenCustomActions)
+    if ($IncludeExporters)               { $passArgs += '-IncludeExporters' }
+    if ($IncludeCoordinationIssuesAddin) { $passArgs += '-IncludeCoordinationIssuesAddin' }
+    if ($IncludeMaterialLibraries)       { $passArgs += '-IncludeMaterialLibraries' }
+    if ($RemoveResidualRegistry)         { $passArgs += '-RemoveResidualRegistry' }
     if ($StopNavisworks) { $passArgs += '-StopNavisworks' }
     if ($ListOnly)       { $passArgs += '-ListOnly' }
     if ($Force)          { $passArgs += '-Force' }
@@ -1680,8 +1711,9 @@ function Remove-ResidualRegistryKeys {
 
 # Both warnings are gated on cleanup actually having been ASKED for. Announcing
 # "Skipping residual cleanup" to an operator who ran -RemoveResidualFiles:$false
-# -RemoveResidualRegistry:$false describes a step that was never scheduled, and
-# sends them hunting for a failure that is really just their own command line.
+# and never passed -RemoveResidualRegistry describes a step that was never
+# scheduled, and sends them hunting for a failure that is really just their own
+# command line.
 if ($failures -gt 0) {
     if ($RemoveResidualFiles -or $RemoveResidualRegistry) {
         Write-Log 'Skipping residual cleanup because one or more products failed to uninstall. Re-run after the uninstall succeeds.' 'WARN'

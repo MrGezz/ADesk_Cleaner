@@ -76,7 +76,8 @@
 .PARAMETER IncludeAddins
     Also remove every product whose name references AutoCAD and the target year
     - object enablers, language packs, extensions - which are orphaned once the
-    core application is gone. Default: $true. Disable with -IncludeAddins:$false.
+    core application is gone. Default: $true. Disable with
+    -IncludeAddins:$false, which needs the -Command form (see .NOTES).
     Cross-version and shared components (RealDWG Shared, Shared Components,
     ObjectDBX, Content Catalog, licensing, version-neutral companion apps) are
     always preserved, as are AutoCAD toolsets/verticals.
@@ -85,21 +86,25 @@
     After a successful uninstall, delete leftover AutoCAD <year>-specific
     folders (per-user settings/profiles, machine settings, and any residual
     AutoCAD <year> program folder). Default: $true. Disable with
-    -RemoveResidualFiles:$false. A runtime guard only permits deletion of paths
-    under an Autodesk tree that reference AutoCAD and the target year; shared
-    Autodesk trees are never removed.
+    -RemoveResidualFiles:$false, which needs the -Command form (see .NOTES). A
+    runtime guard only permits deletion of paths under an Autodesk tree that
+    reference AutoCAD and the target year; shared Autodesk trees are never
+    removed.
 
 .PARAMETER RemoveResidualRegistry
-    Also delete the release-scoped profile keys
-    HKCU/HKLM:\SOFTWARE\Autodesk\AutoCAD\R<release>. Default: $false (opt-in),
-    because these keys carry the RELEASE number and no year: deleting the wrong
-    one destroys a different AutoCAD version's profiles. Only ever acts when the
+    Opt-in. Also delete the release-scoped profile keys
+    HKCU/HKLM:\SOFTWARE\Autodesk\AutoCAD\R<release>. Off by default, because
+    these keys carry the RELEASE number and no year: deleting the wrong one
+    destroys a different AutoCAD version's profiles. Only ever acts when the
     release-to-year mapping was proven from the registry and no other product
-    still claims that release.
+    still claims that release. This is a [switch]: pass it bare, like -Force,
+    not as -RemoveResidualRegistry:$true.
 
 .PARAMETER IncludeMaterialLibraries
     Opt in to also remove Material Library packages matching the target year.
-    Default: $false - material libraries are shared across Autodesk products.
+    Off by default - material libraries are shared across Autodesk products.
+    This is a [switch]: pass it bare, like -Force, not as
+    -IncludeMaterialLibraries:$true.
 
 .PARAMETER NeutralizeBrokenCustomActions
     When an MSI uninstall attempt exits 1603 and its verbose log shows
@@ -109,7 +114,8 @@
     never run) in the COPY, recache it, and retry the uninstall. The protected
     cache is never modified in place (recent Windows builds refuse writes there
     even elevated). Default: $true. Disable with
-    -NeutralizeBrokenCustomActions:$false.
+    -NeutralizeBrokenCustomActions:$false, which needs the -Command form (see
+    .NOTES).
 
     This is not inherited by analogy: the AutoCAD core package carries the same
     file-sourced custom action family (type 3217,
@@ -155,27 +161,44 @@
     powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2025 -StopAutoCAD -Force
 
 .EXAMPLE
-    # Core product only (skip add-ins and residual cleanup):
-    powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false
+    # Full wipe including the release-scoped profile keys (opt-in, bare switch):
+    powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2026 -RemoveResidualRegistry -Force
 
 .EXAMPLE
-    # Full wipe including the release-scoped profile keys:
-    powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2026 -RemoveResidualRegistry:$true -Force
+    # Turning OFF one of the [bool] parameters needs -Command, not -File.
+    # powershell.exe -File passes every argument as a literal string, and a
+    # [bool] parameter rejects the string "$false" outright. Measured: no -File
+    # form works - not :$false, not :0. This is the only shape that binds:
+    powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-AutoCAD.ps1' -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false"
 
 .NOTES
     Requires an elevated (Administrator) session; the script self-elevates.
     Exit code 0 = success, 3010 = success (reboot required), 3 = partial failure,
     2 = nothing found, 1 = aborted.
+
+    -IncludeMaterialLibraries and -RemoveResidualRegistry are [switch] rather
+    than [bool] specifically so that they bind under "powershell.exe -File",
+    which is how every example in this repo is written. Pass them bare - "-Force"
+    style - not as "-RemoveResidualRegistry:$true".
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [ValidatePattern('^\d{4}$')]
     [string]$ProductYear       = '2026',
+    # The [bool] parameters below default ON and are only ever passed to turn a
+    # removal OFF, which is rare. Doing so needs the -Command form - see .NOTES.
     [bool]$IncludeAddins       = $true,
-    [bool]$IncludeMaterialLibraries = $false,
+    # The OPT-INS are [switch], not [bool], and that is deliberate:
+    # "powershell.exe -File" passes every argument as a literal STRING, and a
+    # [bool] parameter's argument transformation rejects the string "$true" with
+    # "Boolean parameters accept only Boolean values and numbers". Measured: NO
+    # -File form binds a [bool] - not :$true, not :1, not :0, not :true. Since
+    # these are the parameters an operator actually types, they must work with
+    # the -File invocation every example in this repo uses.
+    [switch]$IncludeMaterialLibraries,
     [bool]$RemoveResidualFiles = $true,
-    [bool]$RemoveResidualRegistry = $false,
+    [switch]$RemoveResidualRegistry,
     [bool]$NeutralizeBrokenCustomActions = $true,
     [switch]$StopAutoCAD,
     [switch]$IgnoreToolsetGuard,
@@ -405,10 +428,10 @@ if (-not (Test-IsAdministrator)) {
     $passArgs = @()
     $passArgs += ('-ProductYear {0}'          -f $ProductYear)
     $passArgs += ('-IncludeAddins:${0}'       -f $IncludeAddins)
-    $passArgs += ('-IncludeMaterialLibraries:${0}' -f $IncludeMaterialLibraries)
     $passArgs += ('-RemoveResidualFiles:${0}' -f $RemoveResidualFiles)
-    $passArgs += ('-RemoveResidualRegistry:${0}' -f $RemoveResidualRegistry)
     $passArgs += ('-NeutralizeBrokenCustomActions:${0}' -f $NeutralizeBrokenCustomActions)
+    if ($IncludeMaterialLibraries) { $passArgs += '-IncludeMaterialLibraries' }
+    if ($RemoveResidualRegistry)   { $passArgs += '-RemoveResidualRegistry' }
     if ($StopAutoCAD)        { $passArgs += '-StopAutoCAD' }
     if ($IgnoreToolsetGuard) { $passArgs += '-IgnoreToolsetGuard' }
     if ($ListOnly)           { $passArgs += '-ListOnly' }
@@ -859,7 +882,7 @@ $targets = @(
         $isCore -or $isAcadYear -or $isPrivateChild -or $isMaterialYear
     } |
     Where-Object { -not (Test-MatchesAny -Value $_.DisplayName -Patterns $SharedExclusions) } |
-    Where-Object { $_.DisplayName -notmatch '\d{4}\s*-\s*\d{4}' }
+    Where-Object { $_.DisplayName -notmatch '\d{4}\s*[-\u2013]\s*\d{4}' }
 )
 
 # De-duplicate by PRODUCT CODE, never by display name.

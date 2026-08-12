@@ -108,6 +108,12 @@ were preserved, and AutoCAD/Navisworks 2026 (separate apps) were untouched.
    the invoked *script* only sets `$LASTEXITCODE`, and the child collapses every
    non-zero script exit to 1 (verified: `exit 42` → 1 without it, 42 with it).
 
+   Consequence for the *operator-facing* parameters: every opt-in (default-`$false`)
+   parameter across the uninstallers is declared `[switch]`, not `[bool]`, so it
+   binds under the `-File` form the documented examples use — pass it bare, like
+   `-Force`. Only the default-`$true` parameters remain `[bool]`, because turning
+   one *off* is rare and legitimately needs the `-Command` line above.
+
 8. **Do not GUID-collapse msiexec candidates that carry `PROPERTY=` overrides.**
    De-duping msiexec attempts by extracted GUID alone silently deleted the
    `MSI-PropsOverride` candidate (same GUID as the plain `/x {guid}` attempt),
@@ -286,8 +292,11 @@ powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2026
 # Full removal (core + orphaned add-ins + residual), unattended and silent:
 powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2026 -StopRevit -Force
 
-# Core product only:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false
+# Also remove the year's Material Library packages (opt-in, bare switch):
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2026 -IncludeMaterialLibraries
+
+# Core product only — turning a default-on [bool] OFF needs -Command, not -File (lesson 7):
+powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-Revit.ps1' -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false"
 ```
 
 Re-running is idempotent: already-removed items no longer match, and `1605`

@@ -1,8 +1,8 @@
 # ADesk_Cleaner
 
-Four PowerShell uninstallers for Autodesk environments on Windows, plus a small
-general-purpose cleanup utility. Each uninstaller targets a different layer of the stack, and
-each is registry-driven, preview-first, and fully logged.
+Five PowerShell uninstallers for Windows — four for Autodesk environments, one for Fortinet
+FortiClient — plus a small general-purpose cleanup utility. Each uninstaller targets a
+different layer of the stack, and each is registry-driven, preview-first, and fully logged.
 
 | Script | Removes | Elevation |
 |---|---|---|
@@ -10,9 +10,10 @@ each is registry-driven, preview-first, and fully logged.
 | [`Uninstall-AutoCAD.ps1`](Uninstall-AutoCAD.ps1) | **Autodesk AutoCAD**, any year — the whole per-year product family (ODIS bundle, updates, and the two hidden MSI children) plus orphaned add-ins | Required (self-elevates) |
 | [`Uninstall-Navisworks.ps1`](Uninstall-Navisworks.ps1) | **Autodesk Navisworks** Manage / Simulate / Freedom, any year — the ODIS bundle, the hidden MSI child, and all 11 language packs. **Preserves the NWC exporters by default** | Required (self-elevates) |
 | [`Uninstall-PyRevit-Complete.ps1`](Uninstall-PyRevit-Complete.ps1) | **pyRevit** and **pyRevit CLI** — clones, add-in manifests, Windows installation registrations, Start Menu entries, `PATH` entries | Optional |
+| [`Uninstall-FortiClient.ps1`](Uninstall-FortiClient.ps1) | **Fortinet FortiClient** — the MSI, plus the network-stack residue it orphans: kernel drivers, driver-store packages, the virtual adapter devnodes, firewall rules and config hives | Required (self-elevates) |
 | [`Clean-Directory.ps1`](Clean-Directory.ps1) | Not an uninstaller — a recursive sweep for build junk (`*.bak`, `__pycache__`) under a directory you name | None |
 
-> All four uninstallers share the same philosophy: discover what is installed from the registry
+> All five uninstallers share the same philosophy: discover what is installed from the registry
 > rather than from hardcoded paths or GUIDs, invoke the vendor's own uninstaller wherever one
 > exists, preview before acting, refuse to touch shared components, and log everything.
 
@@ -29,11 +30,15 @@ each is registry-driven, preview-first, and fully logged.
 | AutoCAD still listed in Add/Remove Programs after a "successful" uninstall | `Uninstall-AutoCAD.ps1` — it also removes the two hidden MSI children |
 | Navisworks still listed after a "successful" uninstall | `Uninstall-Navisworks.ps1` — the main product MSI has **no uninstall string at all** and is only reachable by product code |
 | Navisworks removed, but Revit/AutoCAD lost their **Export to NWC** command | An earlier sweep took the exporters. See [Reinstalling the exporters](#reinstalling-the-exporters) |
-| A reinstalled AutoCAD came back with the old broken profile | `Uninstall-AutoCAD.ps1 -RemoveResidualRegistry:$true` |
-| A reinstalled Navisworks came back with the old workspace/clash settings | `Uninstall-Navisworks.ps1 -RemoveResidualRegistry:$true` |
+| A reinstalled AutoCAD came back with the old broken profile | `Uninstall-AutoCAD.ps1 -RemoveResidualRegistry` |
+| A reinstalled Navisworks came back with the old workspace/clash settings | `Uninstall-Navisworks.ps1 -RemoveResidualRegistry` |
 | pyRevit installer reports a **leftover installation folder** | `Uninstall-PyRevit-Complete.ps1` |
 | pyRevit still listed in Add/Remove Programs after deleting its folder | `Uninstall-PyRevit-Complete.ps1` |
 | pyRevit ribbon still loading, or a stale clone needs replacing | `Uninstall-PyRevit-Complete.ps1` |
+| Removing FortiClient itself | `Uninstall-FortiClient.ps1` |
+| FortiClient gone from Add/Remove Programs, but a **Fortinet virtual adapter** still shows in Network Connections | `Uninstall-FortiClient.ps1` — it removes the devnode and the driver package, which the MSI leaves behind |
+| `forti*.sys` drivers or a `FortiFilter` service survived a FortiClient uninstall | `Uninstall-FortiClient.ps1` — it finds them by binary metadata, not by name |
+| FortiClient uninstall fails with `1603` | `Uninstall-FortiClient.ps1` — check its verbose MSI log for a live process or an EMS-enforced uninstall lock |
 | Clearing `*.bak` / `__pycache__` out of a project tree | `Clean-Directory.ps1` |
 | Wiping a machine completely | pyRevit first, then Revit, then Navisworks, then AutoCAD |
 
@@ -45,7 +50,7 @@ touches anything outside the pyRevit footprint, so it needs none.)
 
 ## Exit codes
 
-The three Autodesk uninstallers share one contract:
+The three Autodesk uninstallers and `Uninstall-FortiClient.ps1` share one contract:
 
 | Code | Meaning |
 |---|---|
@@ -62,6 +67,12 @@ residual cleanup entirely, because deleting the files of a product you chose to 
 leave a registered product with no files. If you are driving these scripts from automation,
 use `-Force` so nothing can be declined, and read the transcript rather than the exit code
 alone.
+
+`Uninstall-FortiClient.ps1` additionally returns `1` when a Fortinet virtual adapter is
+reporting `Up` — that usually means a VPN tunnel is connected, and tearing the stack down
+mid-tunnel can strand routes. It returns `3010` far more often than the Autodesk scripts do,
+because removing boot-start NDIS drivers genuinely requires a restart; treat `3010` as success
+and re-run the script after rebooting to finish the file sweep.
 
 `Uninstall-PyRevit-Complete.ps1` returns `1` only when you decline to close Revit; a
 **NOT CLEAN** verdict is reported in its output rather than in the exit code.
@@ -111,9 +122,21 @@ powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2024
 # Fully unattended and silent — closes Revit if open, no prompts:
 powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2025 -StopRevit -Force
 
-# Core application only — skip add-ins and residual cleanup:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false
+# ALSO remove the year's Material Library packages (opt-in, bare switch):
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2026 -IncludeMaterialLibraries
+
+# Core application only — skip add-ins and residual cleanup (needs -Command, see the note below):
+powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-Revit.ps1' -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false"
 ```
+
+**`-IncludeMaterialLibraries` is a switch — pass it bare, like `-Force`.** Not
+`-IncludeMaterialLibraries:$true`. This is not cosmetic: `powershell.exe -File` passes every
+argument as a literal **string**, and a `bool` parameter's argument transformation rejects the
+string `"$true"` with *"Boolean parameters accept only Boolean values and numbers"*. Measured:
+**no** `-File` form binds a `bool` — not `:$true`, not `:1`, not `:0`, not `:true`. Switches have
+a parser special-case, which is why `-Force` has always worked. The three default-on `bool`
+parameters (`-IncludeAddins`, `-RemoveResidualFiles`, `-NeutralizeBrokenCustomActions`) are only
+ever passed to turn a removal *off*, and that needs the `-Command` form shown above.
 
 Run `-ListOnly` first. It is the safety gate: it shows exactly what will be removed before you commit.
 
@@ -122,10 +145,10 @@ Run `-ListOnly` first. It is the safety gate: it shows exactly what will be remo
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `-ProductYear` | string | `2026` | Four-digit Revit release year to target (e.g. `2024`). Scopes the core match, add-in sweep, residual folders, the residual guard, and the self-elevation relaunch. Validated as four digits. |
-| `-IncludeAddins` | bool | `$true` | Also remove every product whose name references Revit **and** the target year (add-ins, content, exporters, DB Link, IFC, interop tools). Disable with `-IncludeAddins:$false`. |
-| `-IncludeMaterialLibraries` | bool | `$false` | Opt in to also remove Material Library packages matching the target year. Off by default because material libraries are commonly shared across products. |
-| `-NeutralizeBrokenCustomActions` | bool | `$true` | On `1603` + `Internal Error 2753`, automatically neutralize the broken custom action in a patched copy of the cached package, recache it (`/fv`), and retry — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md). Disable with `-NeutralizeBrokenCustomActions:$false`. |
-| `-RemoveResidualFiles` | bool | `$true` | After a successful uninstall, delete leftover Revit-`<year>`-specific folders (settings, journals, add-in manifests, RVT content, program folder). Disable with `-RemoveResidualFiles:$false`. |
+| `-IncludeAddins` | bool | `$true` | Also remove every product whose name references Revit **and** the target year (add-ins, content, exporters, DB Link, IFC, interop tools). Disable with `-IncludeAddins:$false`, which needs the `-Command` form. |
+| `-IncludeMaterialLibraries` | switch | off | **Opt-in.** Also remove Material Library packages matching the target year. Off by default because material libraries are commonly shared across products. |
+| `-NeutralizeBrokenCustomActions` | bool | `$true` | On `1603` + `Internal Error 2753`, automatically neutralize the broken custom action in a patched copy of the cached package, recache it (`/fv`), and retry — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md). Disable with `-NeutralizeBrokenCustomActions:$false`, which needs the `-Command` form. |
+| `-RemoveResidualFiles` | bool | `$true` | After a successful uninstall, delete leftover Revit-`<year>`-specific folders (settings, journals, add-in manifests, RVT content, program folder). Disable with `-RemoveResidualFiles:$false`, which needs the `-Command` form. |
 | `-StopRevit` | switch | off | Terminate `Revit.exe` if running. Without it, the script aborts when Revit is open. |
 | `-ListOnly` | switch | off | Discover and print matches, then exit. No changes. |
 | `-Force` | switch | off | Fully non-interactive: skips per-item prompts **and** suppresses PowerShell's built-in confirmation. |
@@ -239,9 +262,21 @@ powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 20
 # Fully unattended and silent, closing AutoCAD if it is open:
 powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2025 -StopAutoCAD -Force
 
-# Full wipe including the release-scoped profile keys:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2026 -RemoveResidualRegistry:$true -Force
+# Full wipe including the release-scoped profile keys (opt-in, bare switch):
+powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2026 -RemoveResidualRegistry -Force
+
+# Core application only — skip add-ins and residual cleanup (needs -Command, see the note below):
+powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-AutoCAD.ps1' -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false"
 ```
+
+**`-RemoveResidualRegistry` and `-IncludeMaterialLibraries` are switches — pass them bare, like
+`-Force`.** Not `-RemoveResidualRegistry:$true`. This is not cosmetic: `powershell.exe -File`
+passes every argument as a literal **string**, and a `bool` parameter's argument transformation
+rejects the string `"$true"` with *"Boolean parameters accept only Boolean values and numbers"*.
+Measured: **no** `-File` form binds a `bool` — not `:$true`, not `:1`, not `:0`, not `:true`.
+Switches have a parser special-case, which is why `-Force` has always worked. The three default-on
+`bool` parameters (`-IncludeAddins`, `-RemoveResidualFiles`, `-NeutralizeBrokenCustomActions`) are
+only ever passed to turn a removal *off*, and that needs the `-Command` form shown above.
 
 Run `-ListOnly` first. It is the safety gate: it shows the resolved release, the exact four-entry family in removal order, and every residual location before you commit.
 
@@ -250,11 +285,11 @@ Run `-ListOnly` first. It is the safety gate: it shows the resolved release, the
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `-ProductYear` | string | `2026` | Four-digit AutoCAD release year to target. Scopes the core match, add-in sweep, residual folders, the residual guard, and the self-elevation relaunch. Validated as four digits. |
-| `-IncludeAddins` | bool | `$true` | Also remove every product whose name references AutoCAD **and** the target year (object enablers, language packs, extensions). Disable with `-IncludeAddins:$false`. |
-| `-IncludeMaterialLibraries` | bool | `$false` | Opt in to also remove Material Library packages matching the target year. Off by default because material libraries are shared across products. |
-| `-RemoveResidualFiles` | bool | `$true` | After a successful uninstall, delete leftover AutoCAD-`<year>` folders. Every path carries the year, so this never needs the release number. |
-| `-RemoveResidualRegistry` | bool | `$false` | **Opt-in.** Also delete `HKCU`/`HKLM:\SOFTWARE\Autodesk\AutoCAD\R<release>`. Only acts when the release-to-year mapping was proven and no other product still claims that release. |
-| `-NeutralizeBrokenCustomActions` | bool | `$true` | On `1603` + `Internal Error 2753`, neutralize the broken custom action in a patched copy of the cached package, recache it (`/fv`), and retry. |
+| `-IncludeAddins` | bool | `$true` | Also remove every product whose name references AutoCAD **and** the target year (object enablers, language packs, extensions). Disable with `-IncludeAddins:$false`, which needs the `-Command` form. |
+| `-IncludeMaterialLibraries` | switch | off | **Opt-in.** Also remove Material Library packages matching the target year. Off by default because material libraries are shared across products. |
+| `-RemoveResidualFiles` | bool | `$true` | After a successful uninstall, delete leftover AutoCAD-`<year>` folders. Every path carries the year, so this never needs the release number. Disable with `-RemoveResidualFiles:$false`, which needs the `-Command` form. |
+| `-RemoveResidualRegistry` | switch | off | **Opt-in.** Also delete `HKCU`/`HKLM:\SOFTWARE\Autodesk\AutoCAD\R<release>`. Only acts when the release-to-year mapping was proven and no other product still claims that release. |
+| `-NeutralizeBrokenCustomActions` | bool | `$true` | On `1603` + `Internal Error 2753`, neutralize the broken custom action in a patched copy of the cached package, recache it (`/fv`), and retry. Disable with `-NeutralizeBrokenCustomActions:$false`, which needs the `-Command` form. |
 | `-StopAutoCAD` | switch | off | Terminate target-year AutoCAD processes if running. Other years are identified by path and never touched. Without it, the script aborts when a target-year process is open. |
 | `-IgnoreToolsetGuard` | switch | off | Proceed even when a toolset sharing the base install tree or release key is installed for the target year. |
 | `-ListOnly` | switch | off | Discover and print matches, then exit. No changes. |
@@ -360,11 +395,24 @@ powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear
 powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2025 -StopNavisworks -Force
 
 # ALSO remove the NWC exporters — this breaks Export to NWC from Revit/AutoCAD/3ds Max:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -IncludeExporters:$true
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -IncludeExporters
 
-# Full wipe including the version-scoped profile keys:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -RemoveResidualRegistry:$true -Force
+# Full wipe including the version-scoped profile keys (opt-in, bare switch):
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -RemoveResidualRegistry -Force
+
+# Keep the residual files (needs -Command, see the note below):
+powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-Navisworks.ps1' -ProductYear 2026 -RemoveResidualFiles:$false"
 ```
+
+**`-IncludeExporters`, `-IncludeCoordinationIssuesAddin`, `-IncludeMaterialLibraries` and
+`-RemoveResidualRegistry` are switches — pass them bare, like `-Force`.** Not
+`-IncludeExporters:$true`. This is not cosmetic: `powershell.exe -File` passes every argument as a
+literal **string**, and a `bool` parameter's argument transformation rejects the string `"$true"`
+with *"Boolean parameters accept only Boolean values and numbers"*. Measured: **no** `-File` form
+binds a `bool` — not `:$true`, not `:1`, not `:0`, not `:true`. Switches have a parser
+special-case, which is why `-Force` has always worked. The two default-on `bool` parameters
+(`-RemoveResidualFiles`, `-NeutralizeBrokenCustomActions`) are only ever passed to turn a removal
+*off*, and that needs the `-Command` form shown above.
 
 Run `-ListOnly` first. It is the safety gate: it shows the resolved version key, every matched product in removal order, and every residual location before you commit.
 
@@ -374,12 +422,12 @@ Run `-ListOnly` first. It is the safety gate: it shows the resolved version key,
 |---|---|---|---|
 | `-ProductYear` | string | `2026` | Four-digit Navisworks release year to target. Scopes the core match, residual folders, the residual guard, version resolution, and the self-elevation relaunch. Validated as four digits. |
 | `-Edition` | string | `All` | `All`, `Manage`, `Simulate` or `Freedom`. All three can be installed side by side; non-selected editions are never matched, stopped, or cleaned up. |
-| `-IncludeExporters` | bool | `$false` | **Opt-in, and the one to think about.** Also remove `Autodesk Navisworks Exporters <year>` and its payload inside Revit / AutoCAD / 3ds Max. **This breaks NWC export from those applications** for that exporter year. |
-| `-IncludeCoordinationIssuesAddin` | bool | `$false` | Also remove the ACC/BIM 360 Coordination Issues add-in. It carries no year and its payload spans v18–v24, so it is only removed after a post-uninstall census proves no Navisworks edition of **any** year remains. |
-| `-IncludeMaterialLibraries` | bool | `$false` | Opt in to also removing Material Library packages matching the target year. Off by default because material libraries are shared across products. |
-| `-RemoveResidualFiles` | bool | `$true` | After a fully successful uninstall, delete leftover Navisworks-`<year>` folders (settings, templates, caches, program folder, Start Menu entries, ODIS uninstaller stubs). |
-| `-RemoveResidualRegistry` | bool | `$false` | **Opt-in.** Also delete `HK{LM,CU}:\SOFTWARE\Autodesk\Navisworks <Edition>\<major>.0` and `...\Navisworks API Runtime\<major>\<Edition>`. Only acts when the version mapping was proven, and never touches the parent container key. |
-| `-NeutralizeBrokenCustomActions` | bool | `$true` | On `1603` + `Internal Error 2753`, neutralize the broken custom action in a patched copy of the cached package, recache it (`/fv`), and retry. |
+| `-IncludeExporters` | switch | off | **Opt-in, and the one to think about.** Also remove `Autodesk Navisworks Exporters <year>` and its payload inside Revit / AutoCAD / 3ds Max. **This breaks NWC export from those applications** for that exporter year. |
+| `-IncludeCoordinationIssuesAddin` | switch | off | **Opt-in.** Also remove the ACC/BIM 360 Coordination Issues add-in. It carries no year and its payload spans v18–v24, so it is only removed after a post-uninstall census proves no Navisworks edition of **any** year remains. |
+| `-IncludeMaterialLibraries` | switch | off | **Opt-in.** Also remove Material Library packages matching the target year. Off by default because material libraries are shared across products. |
+| `-RemoveResidualFiles` | bool | `$true` | After a fully successful uninstall, delete leftover Navisworks-`<year>` folders (settings, templates, caches, program folder, Start Menu entries, ODIS uninstaller stubs). Disable with `-RemoveResidualFiles:$false`, which needs the `-Command` form. |
+| `-RemoveResidualRegistry` | switch | off | **Opt-in.** Also delete `HK{LM,CU}:\SOFTWARE\Autodesk\Navisworks <Edition>\<major>.0` and `...\Navisworks API Runtime\<major>\<Edition>`. Only acts when the version mapping was proven, and never touches the parent container key. |
+| `-NeutralizeBrokenCustomActions` | bool | `$true` | On `1603` + `Internal Error 2753`, neutralize the broken custom action in a patched copy of the cached package, recache it (`/fv`), and retry. Disable with `-NeutralizeBrokenCustomActions:$false`, which needs the `-Command` form. |
 | `-StopNavisworks` | switch | off | Terminate target-installation Navisworks processes. Other editions and years are identified by path and never touched. Without it, the script aborts when a target process is running. |
 | `-ListOnly` | switch | off | Discover and print matches, then exit. No changes. |
 | `-Force` | switch | off | Fully non-interactive: skips per-item prompts **and** suppresses PowerShell's built-in confirmation. |
@@ -422,7 +470,7 @@ Stuck on exit `1603` or Internal Error `2753`? The same automated chain the Revi
 
 ### Reinstalling the exporters
 
-If NWC export disappeared from Revit / AutoCAD / 3ds Max, the exporters were removed — either by `-IncludeExporters:$true` here, or by an earlier tool using a blanket "Navisworks" rule. They are **not** restored by reinstalling Navisworks itself, because they are a separate product.
+If NWC export disappeared from Revit / AutoCAD / 3ds Max, the exporters were removed — either by `-IncludeExporters` here, or by an earlier tool using a blanket "Navisworks" rule. They are **not** restored by reinstalling Navisworks itself, because they are a separate product.
 
 Reinstall the free **NWC Export Utility** for the matching year from your Autodesk account. Note the exporter year tracks the *Navisworks* release, not the host application: a Revit 2026 user may deliberately keep Exporters 2023 installed to produce NWC files a 2023-era Navisworks can read, which is why removing exporters for one year can break a workflow that has nothing to do with the edition being removed.
 
@@ -680,6 +728,248 @@ Syntax-checked with the PowerShell 5.1 parser, then run end to end against a liv
 Reinstalling after a CLEAN verdict was not itself re-tested — but the orphaned registration
 that triggers the installer's leftover warning is verifiably gone, which is the condition the
 warning checks.
+
+---
+
+## `Uninstall-FortiClient.ps1` — Fortinet FortiClient
+
+A self-elevating PowerShell script that uninstalls **Fortinet FortiClient** and then removes
+the network-stack residue the vendor MSI orphans: kernel drivers, driver-store packages, the
+virtual adapter device nodes, the Windows Firewall rules, and the configuration hives. Runs
+the vendor uninstaller first and only cleans up after it, exactly like the Autodesk scripts.
+
+Two things make this product different from every other script in this repo. The first is why
+you cannot simply use Add/Remove Programs:
+
+> **FortiClient registers itself as un-removable in the Windows UI.** Verified on this
+> platform: its uninstall key carries `NoRemove = 1` and `NoModify = 1`, so `appwiz.cpl` hides
+> the Remove and Change buttons entirely. That is a UI deterrent only — `msiexec /X` works
+> fine — but it means the supported graphical route simply is not there.
+
+The second is that FortiClient is mostly **network plumbing, not files**. It installs an NDIS
+lightweight filter bound into every adapter, two virtual miniport adapters with PnP device
+nodes, up to six kernel drivers, and three driver-store packages. Removing those by name, or
+in the wrong order, is how a FortiClient cleanup takes the machine's networking with it.
+
+Four FortiClient-specific traps this script is built around:
+
+1. **OEM INF numbers are recycled, and this machine proves it.** The `ftsvnic` service's
+   `DisplayName` reads `@oem45.inf,%VER_ADAPTER_STR%;Fortinet SSL VPN Virtual Ethernet Adapter`
+   — but `C:\Windows\INF\oem45.inf` is **NVIDIA's `nvhda.inf`** (Azalia/HDMI audio). Windows
+   reclaimed the slot after the original Fortinet package was removed, and the stale service
+   key kept pointing at the number. `pnputil /delete-driver oem45.inf /uninstall` would
+   uninstall the machine's audio driver. This script never derives an INF name from a registry
+   string: driver packages are resolved by reading INF **file content** under `C:\Windows\INF`,
+   and each one is re-verified in the moment before it is deleted.
+2. **The service name is not the driver name, and three services have no `forti` in them.**
+   Verified on this platform: `FortiFW` loads `FortiFW2.sys` and `fortisniff` loads
+   `fortisniff2.sys` — and `ft_vnic`, `ftsvnic` and `pppop` (a Fortinet-provided "PPPoP WAN
+   Adapter") contain no `forti` substring at all. A sweep filtered on the service **key name**
+   finds six of the nine services on this machine and silently misses those three. Discovery
+   here walks every service's `ImagePath`, resolves it to a real file, and attributes it by the
+   binary's own `CompanyName`.
+3. **The NDIS lightweight filter is the one that breaks networking.** `FortiFilter` is
+   `Class=NetService`, `Start=1` (SYSTEM_START), and verified **Enabled on 12 adapters** here —
+   every WiFi interface, the Hyper-V Default Switch, even the kernel-debugger NIC. Deleting its
+   service key or its `.sys` while those bindings exist leaves the NDIS binding database
+   referencing a filter that no longer exists, which can leave adapters unable to bind TCP/IP
+   after reboot. It comes out only through its driver package, always **last** among driver
+   operations, and it is never forced.
+4. **The blunt instruments are refused outright.** `netsh winsock reset` and `netsh wfp reset`
+   appear in most published FortiClient removal recipes. Verified on this platform: there is no
+   Fortinet Winsock LSP — all 28 catalog entries are Microsoft providers — and Fortinet's WFP
+   callouts are owned by its own drivers, which unregister them on unload. Both commands are
+   pure downside: they drop every socket and wipe **all** third-party and Windows Firewall
+   filtering state. Neither is ever issued. For the same reason the script never writes to the
+   `Credential Providers` key: `FortiCredentialProvider2.dll` ships on disk but is **not**
+   registered there, and a speculative prune of that key can remove `PasswordProvider` and make
+   the machine unloggable.
+
+### Features
+
+- **Vendor-first removal.** The MSI runs before anything is hand-removed, because it owns the
+  uninstall key, the `Installer\Products` records, the COM registrations and the program tree.
+- **Discovery by identity, never by name** — services by `ImagePath` plus binary `CompanyName`,
+  driver packages by INF file content, PnP devices by their live service binding.
+- **Runtime-resolved device instance IDs.** `ROOT\NET\000N` numbering is positional and shifts
+  as root-enumerated devices come and go, and Hyper-V and the kernel debugger share that
+  namespace — so the target is resolved by service binding and refused if it is ambiguous.
+- **Fixed, non-negotiable removal order** — devnodes, then driver packages, then orphaned
+  service keys, with the NDIS filter package last and the file sweep only after a reboot.
+- **Reboot-aware and idempotent.** Loaded drivers hold their `.sys` files open until restart, so
+  the first run removes registrations and reports what is pending; re-running finishes the job.
+  "Already gone" is treated as success everywhere, including MSI `1605` and `sc.exe` `1060`.
+- **Two independent firewall-rule routes** — the Fortinet rule group, plus application filters
+  whose program path resolves under a discovered Fortinet root. Never a loose name search.
+- **Self-elevation** via UAC with a **fail-closed `-WhatIf` relay**, **preview mode**
+  (`-ListOnly`), and full `-WhatIf` support.
+- **Credential hygiene.** The saved SSL-VPN blobs and the encrypted EMS identity are removed
+  with the hives, but are never read, logged, echoed, or exported — and the script performs no
+  registry export at all.
+
+### Requirements
+
+- Windows 10/11
+- Windows PowerShell 5.1 (built in) — no modules required
+- Administrator rights (the script self-elevates via UAC)
+
+### Usage
+
+```powershell
+# Preview the full census — every service, driver, package, device and rule. Changes nothing:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-FortiClient.ps1 -ListOnly
+
+# Interactive removal, prompting before each step:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-FortiClient.ps1 -StopFortiClient
+
+# Fully unattended, including the config hives and the saved VPN credentials:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-FortiClient.ps1 -StopFortiClient -RemoveResidualRegistry -Force
+
+# Second pass after the reboot, to sweep the files the kernel was holding open:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-FortiClient.ps1 -Force
+
+# Also remove the legacy 2016 Fortinet PPPoP WAN Adapter package:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-FortiClient.ps1 -IncludeLegacyPppop -StopFortiClient
+
+# Turning a default-on removal OFF needs -Command, not -File (see the note below):
+powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-FortiClient.ps1' -RemoveDrivers:$false -StopFortiClient"
+```
+
+**`-RemoveResidualRegistry` and `-IncludeLegacyPppop` are switches — pass them bare, like
+`-Force`.** Not `-RemoveResidualRegistry:$true`. This is not cosmetic: `powershell.exe -File`
+passes every argument as a literal **string**, and a `bool` parameter's argument transformation
+rejects the string `"$true"` with *"Boolean parameters accept only Boolean values and numbers"*.
+Measured: **no** `-File` form binds a `bool` — not `:$true`, not `:1`, not `:0`, not `:true`.
+Switches have a parser special-case, which is why `-Force` has always worked. The three
+default-on `bool` parameters (`-RemoveDrivers`, `-RemoveFirewallRules`, `-RemoveResidualFiles`)
+are only ever passed to turn a removal *off*, and that needs the `-Command` form shown above.
+
+Run `-ListOnly` first. It is the safety gate: it prints every service, driver file, driver-store
+package, PnP device, firewall rule and residual path it has resolved, before you commit.
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-RemoveDrivers` | bool | `$true` | Remove the Fortinet kernel drivers, driver-store packages and virtual adapter devnodes that survive the MSI. This is the reason the script exists — the MSI routinely leaves them. Packages are resolved by INF content, never by a registry-supplied `oemNN` name. |
+| `-IncludeLegacyPppop` | switch | off | **Opt-in.** Also remove the Fortinet "PPPoP WAN Adapter" (`pppop`, `pppop64.sys`, a 2016-vintage `Legacy` package). It predates FortiClient 6.0.6, its name contains no `forti`, and it may belong to a different Fortinet product — so it is reported but never removed silently. |
+| `-RemoveFirewallRules` | bool | `$true` | Remove the inbound allow-rules FortiClient registers (8 of them on this machine). Matched by group name and by application filters under a Fortinet root — never by a loose name search. |
+| `-RemoveResidualFiles` | bool | `$true` | After a successful uninstall, delete leftover Fortinet program folders, Start Menu entries, the all-users desktop shortcut, and the orphaned driver `.sys` files. |
+| `-RemoveResidualRegistry` | switch | off | **Opt-in.** Also delete `HKLM:\SOFTWARE\Fortinet`, `HKCU:\SOFTWARE\Fortinet` and the per-SID `SOFTWARE\Fortinet` keys of every **loaded** user hive. Note what this holds: the saved SSL-VPN tunnel, its DPAPI credential blobs, and the encrypted EMS registration. |
+| `-StopFortiClient` | switch | off | Stop the `FA_Scheduler` service and terminate FortiClient processes before uninstalling. Without it the script aborts when FortiClient is running. |
+| `-SkipTunnelGuard` | switch | off | Proceed even when a Fortinet virtual adapter reports `Up`. Off by default because tearing the stack down mid-tunnel can strand routes and black-hole the default gateway. |
+| `-ListOnly` | switch | off | Run the full census and print everything that would be removed, then exit. No changes. |
+| `-Force` | switch | off | Fully non-interactive: skips per-item prompts **and** suppresses PowerShell's built-in confirmation. |
+| `-LogPath` | string | `%TEMP%\...` | Override the transcript log path. Resolved to an absolute path before elevation. |
+
+### How it works
+
+**Discovery.** The product comes from the uninstall hives by `Publisher` (`*Fortinet*`) as well
+as `DisplayName`, because the free VPN-only edition registers as `FortiClient VPN` and localized
+builds vary further. Install roots are read from `INSTALLDIR` **before** anything deletes the
+hive that holds it, and normalized to the `Fortinet` parent rather than the `FortiClient` child.
+
+**Attribution.** A service belongs to Fortinet when its resolved `ImagePath` binary says so in
+its own version resource, or when that binary sits under a discovered Fortinet root — never
+because its key name starts with `forti`. `ImagePath` is resolved through all four forms that
+occur in practice: quoted absolute, `\SystemRoot\`-relative, bare relative, and `\??\` NT paths.
+
+**Removal order,** which is the whole ballgame:
+
+1. **Census and preview** — nothing is mutated.
+2. **Active tunnel guard** — a Fortinet adapter reporting `Up` aborts the run.
+3. **The scheduler service, then the processes it respawns.** `FA_Scheduler` is the parent of
+   the tray, the ESNAC agent and the VPN daemon, so it is stopped *first*; killing a child
+   before its launcher just gets the child restarted.
+4. **MSI uninstall** with `/qn /norestart` — the registered `QuietUninstallString` is empty, so
+   the silent switches must be supplied explicitly or the run blocks on a dialog.
+5. **Re-census.** The question is not what FortiClient installed, it is what the MSI orphaned.
+6. **PnP devnodes, then driver packages**, with the `NetService` package sorted last.
+7. **Orphaned service keys** that no surviving package owns — the service registration goes
+   before the file, never the reverse.
+8. **Firewall rules, shortcuts, residual files, then the config hives.**
+
+Exit codes `0`, `3010` (reboot required) and `1605` (already gone) are treated as success.
+
+### Safety
+
+- **Preview-first** with `-ListOnly` and full `-WhatIf`, and the `-WhatIf` relay **fails closed**
+  at the UAC boundary rather than letting a preview become a real uninstall.
+- **Driver packages are re-verified in the moment before deletion.** If the INF no longer reads
+  as a Fortinet file, the script refuses and says so — this is the `oem45.inf` guard, and it is
+  the single most important line in the file.
+- **The NDIS filter is never forced.** If `pnputil /delete-driver` fails on it, the run reports
+  and stops rather than retrying with `/force`, because forcing it out while it is still bound
+  is precisely what strands the binding database.
+- **Driver files are guarded by their own version resource**, not by a path rule — they live in
+  `System32\drivers`, which carries no Fortinet path segment, so nothing else would be safe.
+- **Residual directory deletion requires the path to name Fortinet**, and drive roots, protected
+  system roots and short paths are refused outright with a logged reason.
+- **Sibling Fortinet products are not collateral.** `...\Fortinet` is the *scoping* root for
+  process and firewall attribution, never a deletion target — only `...\Fortinet\FortiClient` is
+  queued for removal, and the vendor parent is swept afterwards **only if it ends up empty**.
+  For the same reason the product match requires the *DisplayName* to say FortiClient; the
+  publisher only corroborates it, so a FortiEDR or FortiExplorer install is never fed to
+  `msiexec /x`.
+- **Discovery roots are validated as strictly as deletion targets.** `INSTALLDIR` and
+  `InstallLocation` are vendor-authored and routinely malformed; a root of `C:\` would scope the
+  whole drive, and measured on this machine that would attribute 183 of 360 running processes —
+  `explorer.exe`, `lsass.exe`, `svchost.exe` — to FortiClient. Roots that are drive roots,
+  top-level system containers, or that do not name the vendor are discarded with a warning.
+- **An INF is claimed only by its `Provider` directive**, resolved through the strings table —
+  not by the word "Fortinet" appearing somewhere in the file. A third party's INF whose only
+  mention is a comment (`; do not install alongside Fortinet FortiClient`) is refused.
+- **A locked file is a retry-later, not a failure.** Treating it as fatal would abort the run
+  after the service registrations are already gone — the worst state to stop in.
+- **Driver removal is skipped entirely if the product uninstall failed**, because removing
+  drivers out from under a half-uninstalled product is how a machine loses its network stack.
+- **Colliding process names are path-scoped.** `certutil.exe`, `scheduler.exe`, `ipsec.exe` and
+  `update_task.exe` all live in the FortiClient folder *and* elsewhere on Windows, so they are
+  terminated only when the running image resolves under a Fortinet root.
+- **Unloaded user profiles are left alone.** `reg load` without a guaranteed unload can corrupt
+  or permanently lock a profile, and the leftovers are inert configuration.
+
+### Logging
+
+Every run writes a full transcript to `%TEMP%\Uninstall-FortiClient_<timestamp>.log`. Each MSI
+attempt additionally writes its own verbose Windows Installer log to
+`%TEMP%\MSIVerbose_<guid>_<timestamp>.log`. Attach these logs when reporting issues. Saved
+credentials and the EMS identity are never written to either.
+
+### After uninstalling
+
+**Reboot, then run the script once more.** `FortiFilter.sys`, `ftvnic.sys` and friends are
+loaded in kernel memory and cannot be deleted until the machine restarts; the second run sweeps
+them and reports a clean result. This is expected, not a failure — it is why `3010` is a success
+code here.
+
+Removing FortiClient stops the endpoint's EMS/FortiGate telemetry and deletes any saved SSL-VPN
+tunnel. It does **not** deregister the endpoint on the server side — only the administrator of
+that FortiGate or EMS can do that. If the client was enforcing a NAC compliance gate on a
+network you use, expect that network to stop admitting the machine.
+
+Windows Security Center may briefly continue to list `FortiClient AntiVirus` as a registered
+product. That registration is owned by `FCWscD7.exe` and clears on reboot; the script does not
+hand-edit `HKLM:\SOFTWARE\Microsoft\Security Center`, because doing so can leave Defender
+reporting itself as disabled.
+
+### Notes and limitations
+
+- Verified against **FortiClient 6.0.6.0242** (x64) on Windows 11. Newer 6.4+ and 7.x builds add
+  a `C:\ProgramData\Fortinet` tree and may ship an EMS-pushed uninstall password; the script
+  probes for the former and reports the latter from the MSI log rather than guessing.
+- **An EMS-enforced uninstall lock cannot be bypassed by this script, by design.** If `msiexec`
+  returns `1603` and the verbose log names a password or a management lock, removal has to be
+  initiated from the managing EMS. The script reports it rather than attempting to defeat it.
+- The `pppop` / PPPoP WAN Adapter package is a separate, older Fortinet product. It is always
+  reported and never removed without `-IncludeLegacyPppop`.
+- **Per-user residuals are cleaned for loaded hives only.** A user who is logged off keeps their
+  `HKCU\SOFTWARE\Fortinet` leftovers; they are inert, and forcing them out risks the profile.
+- No System Restore point and no registry export are taken — matching the other scripts in this
+  repo, and additionally because an export of these hives would write DPAPI credential blobs to
+  a file on disk.
+- This tool is not affiliated with or endorsed by Fortinet. "FortiClient" and "Fortinet" are
+  trademarks of Fortinet, Inc.
 
 ---
 

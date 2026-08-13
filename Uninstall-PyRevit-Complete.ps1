@@ -73,25 +73,40 @@ function Remove-Tree {
         return
     }
 
+    # Containment belongs HERE, not at the call sites. It used to be applied only
+    # by the discovery functions' globs, plus the robocopy branch below - so the
+    # Remove-Item and rd paths were ungated, and a new call site would reach
+    # "-Recurse -Force" with no check at all. One of the current inputs comes out
+    # of a user-editable INI. Both existing call sites already satisfy this, so
+    # it changes nothing today and refuses the mistake tomorrow.
+    if ($trimmed -inotmatch 'pyrevit') {
+        Write-Log "refusing to delete a path that does not name pyRevit: $Path" 'ERROR'
+        $script:Failures.Add("guard: $Path")
+        return
+    }
+
     $label = $Path
     if ($Why) { $label = "$Path   ($Why)" }
 
     if ($DryRun) { Write-Log "would remove: $label" 'DRY'; return }
 
-    # git clones ship read-only objects; Inno ships hidden/system files
-    if (Test-Path -LiteralPath $Path -PathType Container) {
-        & attrib.exe -r -s -h "$trimmed\*" /s /d 2>$null | Out-Null
-    }
-
     try {
         Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
     } catch {
+        # git clones ship read-only objects and Inno ships hidden/system files,
+        # but Remove-Item -Force already clears both - so attrib only earns its
+        # recursive walk, and its process spawn, once that has actually failed.
+        # A pyRevit clone is 40-80k files; paying for it up front cost that walk
+        # on every delete in phases 5 and 6.
+        if (Test-Path -LiteralPath $Path -PathType Container) {
+            & attrib.exe -r -s -h "$trimmed\*" /s /d 2>$null | Out-Null
+        }
         # fallback 1: cmd's rd, which tolerates some paths Remove-Item won't
         & cmd.exe /c rd /s /q "$trimmed" 2>$null | Out-Null
         # fallback 2: robocopy-mirror an empty dir over it (long-path safe).
-        # Gated on the path naming pyRevit - /MIR empties the target, so it
-        # must never run against something the globs matched loosely.
-        if ((Test-Path -LiteralPath $Path) -and ($trimmed -imatch 'pyrevit')) {
+        # /MIR empties the target; the function-level guard above is what keeps
+        # it away from anything the globs matched loosely.
+        if (Test-Path -LiteralPath $Path) {
             $empty = Join-Path $env:TEMP ("_pyrv_empty_{0}" -f $PID)
             New-Item -ItemType Directory -Path $empty -Force | Out-Null
             & robocopy.exe $empty "$trimmed" /MIR /NJH /NJS /NP /NFL /NDL 2>$null | Out-Null

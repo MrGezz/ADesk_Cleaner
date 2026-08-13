@@ -262,11 +262,15 @@ foreach ($tok in $EditionTokens) {
 # Navisworks-NAMED products that are NOT the Navisworks application. Every one
 # of these matches a naive "*Navisworks*" rule and none of them should die with
 # the application.
+# Each row carries its own opt-in switch, so adding a product here is the ONLY
+# edit needed to protect it. An earlier version restated these four strings
+# further down and never read this list, which meant appending to the list
+# documented as the place to append bought no protection at all.
 $NavisworksAdjacentPatterns = @(
-    '*Navisworks Exporters*',      # the NWC exporters - see .DESCRIPTION
-    '*Coordination Issues*',       # cross-version ACC issues add-in, no year
-    '*Publish NWC*',               # ACC publish add-in living inside Revit
-    '*NWC Publish*'                # ...and its other two word orders
+    @{ Pattern = '*Navisworks Exporters*'; OptIn = 'IncludeExporters' }  # the NWC exporters - see .DESCRIPTION
+    @{ Pattern = '*Coordination Issues*' }   # cross-version ACC issues add-in, no year
+    @{ Pattern = '*Publish NWC*' }           # ACC publish add-in living inside Revit
+    @{ Pattern = '*NWC Publish*' }           # ...and its other two word orders
 )
 
 # Shared / cross-product components: NEVER touched in this mode.
@@ -296,12 +300,18 @@ $SharedExclusions = @(
 # explicitly opted in. -IncludeCoordinationIssuesAddin is handled separately
 # (post-uninstall census) rather than by unlocking the pattern here, because its
 # removal is conditional on no Navisworks edition of ANY year remaining.
-if (-not $IncludeExporters) {
-    $SharedExclusions += '*Navisworks Exporters*'
+foreach ($adjacent in $NavisworksAdjacentPatterns) {
+    if ($adjacent.ContainsKey('OptIn')) {
+        # A row is unlocked only by its own switch. Unknown switch names are a
+        # typo, and a typo here would silently unlock a protected product.
+        $optIn = Get-Variable -Name $adjacent.OptIn -ValueOnly -ErrorAction SilentlyContinue
+        if ($null -eq $optIn) {
+            throw "Exclusion catalogue error: '$($adjacent.Pattern)' names unknown switch '$($adjacent.OptIn)'"
+        }
+        if ($optIn) { continue }
+    }
+    $SharedExclusions += $adjacent.Pattern
 }
-$SharedExclusions += '*Coordination Issues*'
-$SharedExclusions += '*Publish NWC*'
-$SharedExclusions += '*NWC Publish*'
 
 if (-not $IncludeMaterialLibraries) {
     $SharedExclusions += '*Material Library*'
@@ -1525,7 +1535,11 @@ foreach ($product in $targets) {
 # year in its name and its payload folder holds v18 through v24, so it is
 # genuinely still in use while another Navisworks remains.
 if ($IncludeCoordinationIssuesAddin -and $failures -eq 0 -and $skipped -eq 0) {
-    $remaining = @(Get-InstalledPrograms | Where-Object {
+    # One post-uninstall census serves both questions below. Nothing mutates the
+    # registry between them, so enumerating all three hives twice was a straight
+    # duplicate pass over several hundred keys.
+    $census    = @(Get-InstalledPrograms)
+    $remaining = @($census | Where-Object {
         $_.DisplayName -like '*Navisworks*' -and
         ($_.DisplayName -like '*Manage*' -or $_.DisplayName -like '*Simulate*' -or $_.DisplayName -like '*Freedom*')
     })
@@ -1534,7 +1548,7 @@ if ($IncludeCoordinationIssuesAddin -and $failures -eq 0 -and $skipped -eq 0) {
         $remaining | Sort-Object DisplayName -Unique | ForEach-Object { Write-Log "    - $($_.DisplayName)" }
     }
     else {
-        $cia = @(Get-InstalledPrograms | Where-Object { $_.DisplayName -like '*Navisworks Coordination Issues*' })
+        $cia = @($census | Where-Object { $_.DisplayName -like '*Navisworks Coordination Issues*' })
         foreach ($c in $cia) {
             if (-not $PSCmdlet.ShouldProcess($c.DisplayName, 'Uninstall')) { continue }
             $cands = @(Get-UninstallCandidates -Product $c)

@@ -1,8 +1,9 @@
 # ADesk_Cleaner
 
 Five PowerShell uninstallers for Windows — four for Autodesk environments, one for Fortinet
-FortiClient — plus a small general-purpose cleanup utility. Each uninstaller targets a
-different layer of the stack, and each is registry-driven, preview-first, and fully logged.
+FortiClient — plus a Revit cache cleaner and a small general-purpose cleanup utility. Each
+uninstaller targets a different layer of the stack, and each is registry-driven, preview-first,
+and fully logged.
 
 | Script | Removes | Elevation |
 |---|---|---|
@@ -11,6 +12,7 @@ different layer of the stack, and each is registry-driven, preview-first, and fu
 | [`Uninstall-Navisworks.ps1`](Uninstall-Navisworks.ps1) | **Autodesk Navisworks** Manage / Simulate / Freedom, any year — the ODIS bundle, the hidden MSI child, and all 11 language packs. **Preserves the NWC exporters by default** | Required (self-elevates) |
 | [`Uninstall-PyRevit-Complete.ps1`](Uninstall-PyRevit-Complete.ps1) | **pyRevit** and **pyRevit CLI** — clones, add-in manifests, Windows installation registrations, Start Menu entries, `PATH` entries | Optional |
 | [`Uninstall-FortiClient.ps1`](Uninstall-FortiClient.ps1) | **Fortinet FortiClient** — the MSI, plus the network-stack residue it orphans: kernel drivers, driver-store packages, the virtual adapter devnodes, firewall rules and config hives | Required (self-elevates) |
+| [`Clear-RevitCache.ps1`](Clear-RevitCache.ps1) | Not an uninstaller — **keeps Revit installed** and clears its per-user caches: accelerator cache, web caches, journal history, and (opt-in) the cloud collaboration cache and the Home screen's Recent models page | None |
 | [`Clean-Directory.ps1`](Clean-Directory.ps1) | Not an uninstaller — a recursive sweep for build junk (`*.bak`, `__pycache__`) under a directory you name | None |
 
 > All five uninstallers share the same philosophy: discover what is installed from the registry
@@ -39,6 +41,9 @@ different layer of the stack, and each is registry-driven, preview-first, and fu
 | FortiClient gone from Add/Remove Programs, but a **Fortinet virtual adapter** still shows in Network Connections | `Uninstall-FortiClient.ps1` — it removes the devnode and the driver package, which the MSI leaves behind |
 | `forti*.sys` drivers or a `FortiFilter` service survived a FortiClient uninstall | `Uninstall-FortiClient.ps1` — it finds them by binary metadata, not by name |
 | FortiClient uninstall fails with `1603` | `Uninstall-FortiClient.ps1` — check its verbose MSI log for a live process or an EMS-enforced uninstall lock |
+| Revit is running out of disk, or a stale cache needs clearing — **without** uninstalling it | `Clear-RevitCache.ps1` |
+| Reclaiming the multi-GB cloud model cache after a project ships | `Clear-RevitCache.ps1 -IncludeCollaborationCache -OlderThanDays 30` |
+| Emptying the **Recent models** page on Revit's Home screen | `Clear-RevitCache.ps1 -ClearRecentFiles` |
 | Clearing `*.bak` / `__pycache__` out of a project tree | `Clean-Directory.ps1` |
 | Wiping a machine completely | pyRevit first, then Revit, then Navisworks, then AutoCAD |
 
@@ -76,7 +81,13 @@ and re-run the script after rebooting to finish the file sweep.
 
 `Uninstall-PyRevit-Complete.ps1` returns `1` only when you decline to close Revit; a
 **NOT CLEAN** verdict is reported in its output rather than in the exit code.
-`Clean-Directory.ps1` returns `1` when `-RootPath` does not exist and `0` otherwise.
+`Clean-Directory.ps1` returns `1` when `-RootPath` does not exist or resolves to a drive root,
+and `0` otherwise.
+
+`Clear-RevitCache.ps1` uses the same five codes with cache-shaped meanings: `0` success,
+`3` partial failure (something could not be deleted, usually a file still open), `2` nothing to
+clear, `1` aborted (Revit running without `-StopRevit`, or an invalid `-LogPath`). It never
+returns `3010` — clearing a cache never requires a reboot.
 
 ---
 
@@ -973,6 +984,124 @@ reporting itself as disabled.
 
 ---
 
+## `Clear-RevitCache.ps1` — Revit caches, without uninstalling anything
+
+The only script here that **keeps** Revit installed. It clears Revit's per-user caches — the
+Personal Accelerator cache, the embedded browser caches, stale interprocess queues and journal
+history — and, opt-in, the cloud collaboration cache and the Home screen's **Recent models**
+page. Measured on one real machine: **4.9 GB** in `PacCache`, **1.1 GB** of journals, **35 GB**
+across two years of collaboration cache.
+
+No elevation. Every path is under the current user's profile, so run it as the user whose
+caches you want cleared — running it elevated as a different account clears *that* account's
+caches instead, which is the same trap the Navisworks script documents for per-user residuals.
+
+### Nothing is matched by wildcard
+
+Every other script here discovers what to remove from the registry. This one cannot: a cache is
+a folder, not a registration, and `%LOCALAPPDATA%\Autodesk\Revit\Autodesk Revit <year>\` holds
+caches and non-caches side by side. So the script carries an explicit **catalogue** of cache
+locations and touches nothing else. A subfolder a future Revit release adds is *reported* as
+left alone rather than swept up:
+
+```
+left alone: Autodesk Revit 2026\CC0778F2-011B-4284-B105-0009461644C5   (not in the cache catalogue)
+left alone: Revit Personal Accelerator   (accelerator config (config.json), not cache)
+```
+
+The catalogue is also the authorisation: a location it did not resolve cannot be deleted, and a
+catalogue row naming an unknown mode or an unknown opt-in switch is a **startup error**, not a
+silent no-op. Both directions of that used to fail dangerously — a typo'd mode meant "delete the
+whole container", a typo'd switch meant "never clears, even when asked".
+
+### The three opt-ins
+
+| Switch | What it adds | Why it is not default |
+|---|---|---|
+| `-IncludeCollaborationCache` | The local copy of every cloud-workshared (BIM 360 / ACC) model | **Unsynced work lives here and nowhere else.** Sync and close every cloud model first. Anything already synced is re-downloaded on next open — slow, but lossless. |
+| `-ClearRecentFiles` | The Home screen's Recent models page | Not about disk space; it resets a list you navigate by. See below. |
+| `-IncludeErrorReports` | `%LOCALAPPDATA%\Autodesk\CER` | Crash dumps for **every** Autodesk product, not just Revit — the evidence Autodesk support asks for. |
+
+An opt-in cache that exists but was not asked for is reported with its size and its switch, so
+a 22 GB cache is never silently invisible:
+
+```
+22.68 GB  2023 CollaborationCache - NOT in scope; add -IncludeCollaborationCache
+```
+
+`-OlderThanDays` is the practical safety valve for the collaboration cache: a project you have
+not opened in 30 days is one you have already synced.
+
+### Clearing the Recent models page
+
+The Home screen's Recent list is **two stores**, and clearing one without the other leaves the
+page half-populated:
+
+1. the card thumbnails, in `%APPDATA%\Autodesk\Revit\Autodesk Revit <year>\RecentFileCache\`
+2. the list itself, which lives inside **`Revit.ini`** under `[Recent File List]`
+
+`Revit.ini` holds every Revit setting you have, so it is edited **surgically** rather than
+deleted: only the `FileN=` lines, and the `ConfigN=` lines in `[Recent Workset List]` that are
+keyed to them, are removed. Section headers and every unrelated setting stay. The file is
+**UTF-16 LE with a BOM** — rewriting it as UTF-8 corrupts the lot — so the original encoding is
+detected from the BOM and handed back to the writer, and the file is backed up to
+`Revit.ini.<timestamp>.bak` first.
+
+Revit rewrites `Revit.ini` when it exits, so this only sticks with Revit closed — which the
+process guard already enforces. No model is touched; only the shortcuts to them.
+
+### Usage
+
+```powershell
+# Preview every cache on the machine with sizes — changes nothing:
+powershell -ExecutionPolicy Bypass -File .\Clear-RevitCache.ps1 -ListOnly
+
+# Clear the safe caches for every year, prompting per location:
+powershell -ExecutionPolicy Bypass -File .\Clear-RevitCache.ps1
+
+# One year, unattended, closing Revit and the accelerator if they are open:
+powershell -ExecutionPolicy Bypass -File .\Clear-RevitCache.ps1 -ProductYear 2026 -StopRevit -Force
+
+# Empty the Home screen's Recent models page as well:
+powershell -ExecutionPolicy Bypass -File .\Clear-RevitCache.ps1 -ClearRecentFiles
+
+# ALSO clear cloud models — only projects untouched for 30+ days:
+powershell -ExecutionPolicy Bypass -File .\Clear-RevitCache.ps1 -IncludeCollaborationCache -OlderThanDays 30
+```
+
+Run `-ListOnly` first, for the same reason the uninstallers have it.
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-ProductYear` | string | `All` | Four-digit year, or `All` for every year found on disk. Shared caches (`PacCache`, `interprocess`, CER) are not year-scoped. |
+| `-KeepJournals` | int | `10` | Journal sessions to keep per year. Journals are Revit's own crash log, so this trims rather than empties. A session is kept or dropped as a unit — the `.txt`, its `.worker1.log`, its `.dmp` and its `.abbrev` go together. |
+| `-IncludeCollaborationCache` | switch | off | **Opt-in.** Cloud model cache. Unsynced work lives here. |
+| `-ClearRecentFiles` | switch | off | **Opt-in.** Empty the Home screen's Recent models page. |
+| `-IncludeErrorReports` | switch | off | **Opt-in.** The shared Autodesk crash dump store. |
+| `-OlderThanDays` | int | `0` | Only clear entries older than N days. `0` disables the filter. |
+| `-StopRevit` | switch | off | Terminate `Revit.exe` and the accelerator. Without it the script aborts when Revit is running, and skips only the cache a still-running helper holds open. |
+| `-ListOnly` | switch | off | Print every cache entry with size and age, then exit. |
+| `-Force` | switch | off | Non-interactive: skips the per-location prompt **and** the typed `YES` the collaboration cache otherwise requires. |
+| `-LogPath` | string | `%TEMP%\...` | Override the log path. |
+
+### Notes and limitations
+
+- **`RecentFileCache` is not cleared by default** — it is ~0.1 MB, so there is no space case for
+  it, and it is part of the Recent page rather than a cache in its own right. `-ClearRecentFiles`
+  is the switch that takes it.
+- Clearing the web caches (`CefCache`, `WebBrowserControl`) can force a re-sign-in to Revit Home
+  and Autodesk services.
+- The accelerator (`RevitAccelerator.exe`) holds `PacCache` open. Without `-StopRevit` the script
+  skips that one cache and clears the rest rather than aborting the run.
+- A collaboration cache relocated by registry override is cleared **where it actually lives**;
+  the override is read rather than assumed. A location that resolves to a system directory is
+  refused outright.
+- Exit `3` after a run usually means a file was still open — close Revit and re-run.
+
+---
+
 ## `Clean-Directory.ps1` — build-junk sweeper
 
 Not an uninstaller and not Autodesk-specific. A small recursive sweep that finds and deletes
@@ -996,7 +1125,7 @@ powershell -ExecutionPolicy Bypass -File .\Clean-Directory.ps1 -RootPath "C:\Pro
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `-RootPath` | string | *(required)* | The top-level directory to scan recursively. The script exits `1` if it does not exist. |
+| `-RootPath` | string | *(required)* | The top-level directory to scan recursively. The script exits `1` if it does not exist, or if it resolves to a drive root. |
 | `-WhatIf` | switch | off | List what would be deleted and exit without deleting. A plain switch, not the PowerShell common parameter. |
 
 To sweep other patterns, edit the two arrays at the top of the script:
@@ -1013,8 +1142,9 @@ $FolderPatterns = @("__pycache__")
 - Per-item failures (locked files, denied ACLs) are collected and reported at the end rather
   than stopping the run — but the script still exits `0` in that case, so check the printed
   error list rather than the exit code.
-- There is no path guard beyond `-RootPath` having to exist. Unlike the uninstallers, this
-  script will happily accept a drive root, so read the `-WhatIf` output before committing.
+- A drive root is refused outright (exit `1`). `-RootPath C:\` would otherwise recurse the
+  whole disk and delete every `*.bak` and `__pycache__` on it behind a single `YES`. Any other
+  path is accepted as given, so read the `-WhatIf` output before committing.
 
 ---
 
@@ -1029,6 +1159,21 @@ generalizes to the AutoCAD and Navisworks scripts, which reuse the same MSI mach
 
 [TROUBLESHOOTING.md](TROUBLESHOOTING.md) is the operator-facing companion: the error-code map
 and the manual fallback routes when the automated remediation cannot proceed.
+
+[LESSONS_LEARNED.md](LESSONS_LEARNED.md) is the maintainer-facing one, and covers **all** the
+scripts rather than just Revit. Every uninstall error that forced an iteration — 1606 needing a
+second patch location, 1603/2753, the `/I` language-pack trap, `-WhatIf` failing to cross the
+UAC boundary and destroying a live install — is written up as symptom → root cause → **the
+invariant that must not be undone**. It ends with a 16-line regression checklist to run through
+before committing a change, plus the drift that is currently known and unfixed.
+
+**Read it before editing any script here.** These three documents answer different questions:
+
+| Document | Answers |
+|---|---|
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | "My uninstall failed with code N. What now?" |
+| [Revit_Uninstall_Reference.md](Revit_Uninstall_Reference.md) | "What exactly does Revit register, and where?" |
+| [LESSONS_LEARNED.md](LESSONS_LEARNED.md) | "Why is the code written this way, and what breaks if I change it?" |
 
 ---
 

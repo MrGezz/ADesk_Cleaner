@@ -151,6 +151,22 @@ Set-StrictMode -Version Latest
 # every product even under -Force).
 if ($Force) { $ConfirmPreference = 'None' }
 
+# A relative -LogPath must be rooted against the OPERATOR's working directory.
+# This runs BEFORE the self-elevation relaunch on purpose: the relay forwards
+# -LogPath to the elevated child, whose working directory is NOT the operator's
+# (it is %SystemRoot%\System32), so resolving afterwards would silently write
+# the transcript somewhere else entirely.
+if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+    try {
+        $LogPath = [IO.Path]::GetFullPath(
+            [IO.Path]::Combine((Get-Location).ProviderPath, $LogPath))
+    }
+    catch {
+        Write-Host "Invalid -LogPath '$LogPath': $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+}
+
 # --- Configuration --------------------------------------------------------
 # $ProductYear is supplied by the -ProductYear parameter (default 2026) and
 # scopes every match below.
@@ -240,6 +256,21 @@ if (-not (Test-IsAdministrator)) {
     if ($StopRevit) { $passArgs += '-StopRevit' }
     if ($ListOnly)  { $passArgs += '-ListOnly' }
     if ($Force)     { $passArgs += '-Force' }
+
+    # COMMON parameters live OUTSIDE param(), so a relay assembled from this
+    # script's own parameter list silently drops them at the UAC boundary.
+    #
+    # For -WhatIf that is not cosmetic, it is catastrophic: the elevated child
+    # starts WITHOUT -WhatIf, $PSCmdlet.ShouldProcess() returns $true, and a
+    # command the user issued as a PREVIEW performs a real uninstall. Measured
+    # on the sibling script 2026-08-02: `-ProductYear 2026 -WhatIf -Force`
+    # removed a live AutoCAD 2026 because -WhatIf stopped at this boundary.
+    if ($WhatIfPreference) { $passArgs += '-WhatIf' }
+    if ($PSBoundParameters.ContainsKey('Confirm')) {
+        $passArgs += ('-Confirm:${0}' -f [bool]$PSBoundParameters['Confirm'])
+    }
+    if ($VerbosePreference -eq 'Continue') { $passArgs += '-Verbose' }
+    if ($DebugPreference   -eq 'Continue') { $passArgs += '-Debug' }
     if ($LogPath)   { $passArgs += ("-LogPath '{0}'" -f ($LogPath -replace "'", "''")) }
 
     # powershell.exe -File CANNOT bind [bool] parameters (nor -Switch:$false):
@@ -257,6 +288,16 @@ if (-not (Test-IsAdministrator)) {
     # 0/2/3/3010 exit-code contract relayed by the non-elevated parent.
     $qPath   = $PSCommandPath -replace "'", "''"
     $cmdLine = '-NoProfile -ExecutionPolicy Bypass -Command "& ''{0}'' {1}; exit $LASTEXITCODE"' -f $qPath, ($passArgs -join ' ')
+
+    # FAIL CLOSED. The elevation boundary is a SERIALIZATION boundary: anything
+    # not explicitly written into $cmdLine does not exist in the privileged
+    # child. A preview flag that fails to cross it turns a preview into a real
+    # uninstall, so verify it is actually present in the bytes about to be
+    # launched rather than trusting that the line above added it.
+    if ($WhatIfPreference -and $cmdLine -notmatch '(?i)(?<=\s)-WhatIf(?=\s|;|")') {
+        Write-Host 'Refusing to elevate: -WhatIf was requested but is not present in the elevated command line. Aborting rather than running a real uninstall under a preview flag.' -ForegroundColor Red
+        exit 1
+    }
 
     try {
         $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $cmdLine -Verb RunAs -PassThru -Wait -ErrorAction Stop
@@ -278,7 +319,20 @@ if (-not $LogPath) {
     $stamp   = Get-Date -Format 'yyyyMMdd_HHmmss'
     $LogPath = Join-Path $env:TEMP "Uninstall-Revit${ProductYear}_$stamp.log"
 }
-try { Start-Transcript -Path $LogPath -Append | Out-Null } catch { }
+# -WhatIf:$false is deliberate. Start-Transcript is itself ShouldProcess-aware,
+# so under -WhatIf it PREVIEWS instead of opening the log - and the run then
+# ends by announcing a log path for a file that was never written. A preview you
+# cannot review afterwards is the least useful kind, and the transcript is this
+# script's own diagnostic output in %TEMP%, not a change to the machine being
+# previewed.
+try { Start-Transcript -Path $LogPath -Append -WhatIf:$false | Out-Null } catch { }
+
+# Preload CimCmdlets while the preview flag is switched off in a child scope.
+# Get-CimInstance (invoking-user lookup, further down) autoloads this module; if
+# that happens mid -WhatIf run, the module's OWN top-level Set-Alias calls
+# inherit $WhatIfPreference and spray "What if: Performing the operation Set
+# Alias" lines into the middle of the report.
+& { $WhatIfPreference = $false; Import-Module CimCmdlets -ErrorAction SilentlyContinue }
 
 function Write-Log {
     param([string]$Message, [string]$Level = 'INFO')

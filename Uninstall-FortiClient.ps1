@@ -707,8 +707,14 @@ function Get-FortinetDriverPackages {
     if (-not (Test-Path -LiteralPath $infDir)) { return }
 
     Get-ChildItem -Path $infDir -Filter 'oem*.inf' -File -ErrorAction SilentlyContinue | ForEach-Object {
+        # ReadAllLines, not Get-Content: in PS 5.1 Get-Content wraps every line
+        # in a PSObject carrying PSPath/PSParentPath/ReadCount note properties.
+        # The driver store here is ~149 oem*.inf / 9.1 MB / 164k lines, and all
+        # but a handful are discarded one line below - so that decoration was
+        # seconds per pass, on a function called three times per run. Both
+        # consumers below take a plain string[] identically.
         $text = $null
-        try { $text = Get-Content -LiteralPath $_.FullName -ErrorAction Stop } catch { return }
+        try { $text = [System.IO.File]::ReadAllLines($_.FullName) } catch { return }
         if ($null -eq $text) { return }
 
         # Gate on the Provider directive, not on a substring anywhere in the file.
@@ -747,7 +753,7 @@ function Test-FortinetInfStillValid {
     if ([string]::IsNullOrWhiteSpace($InfPath)) { return $false }
     if (-not (Test-Path -LiteralPath $InfPath)) { return $false }
     try {
-        $text = Get-Content -LiteralPath $InfPath -ErrorAction Stop
+        $text = [System.IO.File]::ReadAllLines($InfPath)
         return ((Get-InfProviderName $text) -match '(?i)^Fortinet\b')
     }
     catch { return $false }

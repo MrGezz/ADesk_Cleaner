@@ -31,6 +31,20 @@ if (-not (Test-Path -LiteralPath $RootPath)) {
     exit 1
 }
 
+# Every other script in this repo refuses a drive root before it deletes
+# anything; this one is the sweep most likely to be pointed somewhere broad by
+# accident. "-RootPath C:\" would otherwise recurse the entire drive and delete
+# every *.bak and __pycache__ on it behind a single "YES".
+try { $resolvedRoot = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $RootPath).ProviderPath).TrimEnd('\') }
+catch {
+    Write-Error "Could not resolve -RootPath '$RootPath': $($_.Exception.Message)"
+    exit 1
+}
+if ($resolvedRoot.Length -le 3 -or $resolvedRoot -notmatch '\\') {
+    Write-Error "Refusing to scan a drive root: $resolvedRoot. Name a project folder instead."
+    exit 1
+}
+
 Write-Host "Scanning: $RootPath" -ForegroundColor Cyan
 Write-Host "File patterns:   $($FilePatterns -join ', ')"
 Write-Host "Folder patterns: $($FolderPatterns -join ', ')"

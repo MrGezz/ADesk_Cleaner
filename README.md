@@ -1,9 +1,9 @@
 # ADesk_Cleaner
 
-Five PowerShell uninstallers for Windows — four for Autodesk environments, one for Fortinet
-FortiClient — plus a Revit cache cleaner and a small general-purpose cleanup utility. Each
-uninstaller targets a different layer of the stack, and each is registry-driven, preview-first,
-and fully logged.
+Six PowerShell uninstallers for Windows — four for Autodesk environments, one for Fortinet
+FortiClient, one for Adobe Creative Cloud — plus a Revit cache cleaner and a small
+general-purpose cleanup utility. Each uninstaller targets a different layer of the stack, and
+each is registry-driven, preview-first, and fully logged.
 
 | Script | Removes | Elevation |
 |---|---|---|
@@ -12,10 +12,11 @@ and fully logged.
 | [`Uninstall-Navisworks.ps1`](Uninstall-Navisworks.ps1) | **Autodesk Navisworks** Manage / Simulate / Freedom, any year — the ODIS bundle, the hidden MSI child, and all 11 language packs. **Preserves the NWC exporters by default** | Required (self-elevates) |
 | [`Uninstall-PyRevit-Complete.ps1`](Uninstall-PyRevit-Complete.ps1) | **pyRevit** and **pyRevit CLI** — clones, add-in manifests, Windows installation registrations, Start Menu entries, `PATH` entries | Optional |
 | [`Uninstall-FortiClient.ps1`](Uninstall-FortiClient.ps1) | **Fortinet FortiClient** — the MSI, plus the network-stack residue it orphans: kernel drivers, driver-store packages, the virtual adapter devnodes, firewall rules and config hives | Required (self-elevates) |
+| [`Uninstall-Adobe.ps1`](Uninstall-Adobe.ps1) | **Adobe Creative Cloud products you select** — Photoshop, Illustrator, Acrobat and the rest, by SAP code or name, via Adobe's own HyperDrive uninstaller. **Preserves shared runtimes** other Adobe apps still reference | Required (self-elevates) |
 | [`Clear-RevitCache.ps1`](Clear-RevitCache.ps1) | Not an uninstaller — **keeps Revit installed** and clears its per-user caches: accelerator cache, web caches, journal history, and (opt-in) the cloud collaboration cache and the Home screen's Recent models page | None |
 | [`Clean-Directory.ps1`](Clean-Directory.ps1) | Not an uninstaller — a recursive sweep for build junk (`*.bak`, `__pycache__`) under a directory you name | None |
 
-> All five uninstallers share the same philosophy: discover what is installed from the registry
+> All six uninstallers share the same philosophy: discover what is installed from the registry
 > rather than from hardcoded paths or GUIDs, invoke the vendor's own uninstaller wherever one
 > exists, preview before acting, refuse to touch shared components, and log everything.
 
@@ -41,6 +42,13 @@ and fully logged.
 | FortiClient gone from Add/Remove Programs, but a **Fortinet virtual adapter** still shows in Network Connections | `Uninstall-FortiClient.ps1` — it removes the devnode and the driver package, which the MSI leaves behind |
 | `forti*.sys` drivers or a `FortiFilter` service survived a FortiClient uninstall | `Uninstall-FortiClient.ps1` — it finds them by binary metadata, not by name |
 | FortiClient uninstall fails with `1603` | `Uninstall-FortiClient.ps1` — check its verbose MSI log for a live process or an EMS-enforced uninstall lock |
+| Removing **one** Adobe app (say Photoshop) but keeping the others | `Uninstall-Adobe.ps1 -Product PHSP` |
+| Not sure what Adobe products are even installed | `Uninstall-Adobe.ps1 -ListOnly` — it finds the nine that have **no name** in Add/Remove Programs |
+| An Adobe app is gone from Add/Remove Programs but its folder and shortcuts remain | `Uninstall-Adobe.ps1` — re-run it; residual cleanup is keyed to the products it removed |
+| Adobe uninstall reported **exit code 130** | Expected. That component is still referenced by another Adobe app — remove the apps first, then re-run with `-IncludeSharedComponents` |
+| Camera Raw / CoreSync / colour profiles survived removing every Adobe app | `Uninstall-Adobe.ps1 -All -IncludeSharedComponents` as a second pass |
+| Adobe context-menu entries or cloud-sync icon overlays still in Explorer | `Uninstall-Adobe.ps1 -RemoveShellExtensions` — they are registered as `AccExt`, with no "Adobe" in the name |
+| Reclaiming the multi-GB `ProgramData\Adobe\CameraRaw` library | `Uninstall-Adobe.ps1 -RemoveUserData` — **also deletes your Camera Raw presets** |
 | Revit is running out of disk, or a stale cache needs clearing — **without** uninstalling it | `Clear-RevitCache.ps1` |
 | Reclaiming the multi-GB cloud model cache after a project ships | `Clear-RevitCache.ps1 -IncludeCollaborationCache -OlderThanDays 30` |
 | Emptying the **Recent models** page on Revit's Home screen | `Clear-RevitCache.ps1 -ClearRecentFiles` |
@@ -55,7 +63,8 @@ touches anything outside the pyRevit footprint, so it needs none.)
 
 ## Exit codes
 
-The three Autodesk uninstallers and `Uninstall-FortiClient.ps1` share one contract:
+The three Autodesk uninstallers, `Uninstall-FortiClient.ps1` and `Uninstall-Adobe.ps1` share one
+contract:
 
 | Code | Meaning |
 |---|---|
@@ -78,6 +87,13 @@ reporting `Up` — that usually means a VPN tunnel is connected, and tearing the
 mid-tunnel can strand routes. It returns `3010` far more often than the Autodesk scripts do,
 because removing boot-start NDIS drivers genuinely requires a restart; treat `3010` as success
 and re-run the script after rebooting to finish the file sweep.
+
+`Uninstall-Adobe.ps1` returns `1` for two additional cases specific to selection: a `-Product`
+value that matches **no** product or **more than one** (it prints the candidates and changes
+nothing), and `-Force` without `-Product` or `-All` (there is no menu to answer, and it refuses
+to assume you meant every Adobe product). Note that Adobe's **exit code `130`** — a shared
+component still referenced by another installed product — is *not* a failure and does not
+produce exit `3`; the run reports it and exits `0`.
 
 `Uninstall-PyRevit-Complete.ps1` returns `1` only when you decline to close Revit; a
 **NOT CLEAN** verdict is reported in its output rather than in the exit code.
@@ -981,6 +997,251 @@ reporting itself as disabled.
   a file on disk.
 - This tool is not affiliated with or endorsed by Fortinet. "FortiClient" and "Fortinet" are
   trademarks of Fortinet, Inc.
+
+---
+
+## `Uninstall-Adobe.ps1` — Adobe Creative Cloud, one product at a time
+
+A self-elevating PowerShell script that uninstalls **the Adobe products you choose** by driving
+Adobe's own HyperDrive uninstaller, then removes only the residue belonging to the products
+actually removed. It is the only script in this repo built around **selection**: run it with
+`-ListOnly` to see what is installed, then name what you want gone.
+
+The thing that makes Adobe different from every other product in this repo:
+
+> **An Adobe Creative Cloud product is not an MSI.** There is no `ProductCode`, no cached
+> `.msi`, no `msiexec` route, and nothing in `HKLM:\SOFTWARE\Classes\Installer\Products`.
+> Verified on this platform: `C:\Windows\Installer` holds 1,303 cached packages and **not one**
+> is Adobe's. Every product instead delegates to a single shared broker, identified by a
+> four-letter **SAP code**:
+>
+> ```
+> "…\Common Files\Adobe\Adobe Desktop Common\HDBox\Uninstaller.exe"
+>   --uninstall=1 --sapCode=PHSP --productVersion=26.6.1 --productPlatform=win64
+>   --productAdobeCode={PHSP-26.6.1-64-ADBEADBEADBEADBEADBEA} --productName="Photoshop" --mode=1
+> ```
+>
+> That command line is replayed **verbatim** from the registry, never reconstructed:
+> `--productAdobeCode` is a per-product literal whose `ADBEADBE` padding length varies with the
+> SAP code and version string, and cannot be derived.
+
+Six Adobe-specific traps this script is built around:
+
+1. **The products are invisible to a normal registry sweep — twice over.** Verified on this
+   platform: all **12** Adobe rows live in the 32-bit view
+   (`HKLM:\SOFTWARE\WOW6432Node\…\Uninstall`) — *including the win64 applications* — and the
+   native 64-bit hive holds **zero**. Worse, **9 of the 12 carry no `DisplayName` at all**; they
+   are hidden from Add/Remove Programs by having no name rather than by `SystemComponent=1`, so
+   the usual `SystemComponent -eq 1` detection never fires either. A sweep filtered on
+   `DisplayName -like '*Adobe*'` finds **three** products and silently leaves nine installed.
+   This script keys on `Publisher` and on the uninstall command's own `--sapCode`, and
+   synthesises a label from `--productName` when `DisplayName` is absent.
+2. **Exit code `130` is a refusal, not a failure.** Adobe's engine refcounts shared components:
+   asked to remove one that another installed product still references, it returns `130` and
+   correctly declines. This machine's own `C:\ProgramData\Adobe\Installer\Summary.htm` already
+   records a `130` from a previous attempt. A script that treats non-zero as failure and
+   escalates to deleting the files by hand destroys a runtime the surviving applications still
+   need — the same hazard as pulling `RealDWG Shared` out from under Revit. Here `130` is
+   reported as *"still referenced"* and counted as success.
+3. **The exit code is not the authority; the registry is.** `Uninstaller.exe` is a thin shim
+   that hands the real work to `HDPIM.dll` and, when the Creative Cloud desktop app is present,
+   to a GUI over a named pipe — so the process can return before, or independently of, the
+   outcome. Every product is verified by **re-reading its uninstall key afterwards**. Key gone =
+   removed, whatever the code said; key still present = not removed, whatever the code said.
+4. **`InstallLocation` is a shared parent, and deleting it destroys the uninstaller.** Verified
+   on this platform: **seven of the twelve rows** declare an `InstallLocation` of
+   `C:\Program Files (x86)\Common Files\Adobe` or its 64-bit twin — not a per-product folder.
+   That first path is the directory **containing `HDBox\Uninstaller.exe`**. A cleanup loop that
+   deletes each removed row's `InstallLocation` would, on Camera Raw, delete the tool needed to
+   remove everything else. This script never derives a deletion target from `InstallLocation`.
+5. **The applications block their own uninstall, deliberately.** Photoshop and Illustrator are
+   declared in Adobe's conflicting-process metadata with `forceKillAllowed="false"` — the engine
+   refuses rather than kills them, because you may have unsaved work. Running the uninstall with
+   them open produces an opaque failure. The script pre-flights for them and stops with a list,
+   and only closes them under `-StopAdobe`, which asks each window to close before forcing it.
+6. **File attribution by `CompanyName` is unsafe here in both directions.** Measured across 645
+   binaries under the Adobe roots on this platform: "Adobe" is spelled **eight** different ways
+   (`Adobe`, `Adobe Inc.`, `Adobe Inc` with no period, `Adobe Systems Incorporated`,
+   `Adobe, Inc.`, `Adobe ` with a trailing space, `Adobe.`, `Adobe Systems, Incorporated`);
+   **114 files carry no `CompanyName` at all** — including `CoreSync.exe` and `CCXProcess.exe`,
+   the two most visible background processes; and **57 DLLs inside Adobe Illustrator 2025 report
+   `Autodesk, Inc.`**, because Illustrator ships AutoCAD's ObjectDBX libraries. In a repo that
+   also ships Autodesk uninstallers, that cuts both ways. Residual removal here is authorised by
+   **path containment** under a verified Adobe root, never by a per-file vendor string.
+
+### Features
+
+- **You choose what goes.** `-Product` accepts SAP codes (`PHSP`), display names
+  (`"Adobe Photoshop 2025"`), or fragments (`Photoshop`), in any mixture. With no selector and
+  no `-Force`, it presents a numbered menu.
+- **Ambiguity is never resolved by guessing.** A selector matching more than one product aborts
+  the run and prints the candidates with their SAP codes. A selector matching none aborts and
+  prints the full selectable list.
+- **Applications and shared components are classified, not confused.** Structural test first —
+  a product with a dedicated install directory is an application; one whose `InstallLocation`
+  is a shared `Common Files` parent is not — corroborated by a known-SAP list, so a machine
+  carrying products this repo has never seen still classifies correctly.
+- **Vendor-first removal.** Adobe's own uninstaller runs before anything is hand-removed, and
+  its command line is replayed byte-for-byte out of the registry.
+- **Verified against the registry, not the exit code**, after every single product.
+- **`CCXP` is guarded, not forbidden.** Adobe's metadata claims `node.exe` as a conflicting
+  process for it, and the engine force-kills what it claims — which on a developer workstation is
+  every unrelated Node process. So the script refuses **only while foreign `node.exe` processes
+  are actually running**, lists them with their PIDs and paths, and tells you to close them.
+  An earlier revision refused CCXP outright; that was a bug, because nothing else references CCXP
+  so refcounting never reclaims it either — it stayed registered forever, and the vendor-wide
+  sweep (gated on *no* Adobe product remaining) could then never run, permanently stranding
+  ~620 MB of shared plumbing. A guard you can satisfy is correct; a refusal you cannot is not.
+- **Shared plumbing is only swept once nothing is registered.** `Common Files\Adobe` is shared
+  by every Adobe product *and holds the uninstaller* — so it is touched only after the last
+  Adobe row is gone.
+- **Reparse-point-safe profile enumeration.** Verified on this platform: `C:\Users\IcZ` is a
+  **symbolic link** to the one real profile and `C:\Users\All Users` is a symbolic link to
+  `C:\ProgramData`. An unfiltered per-profile loop walks into `ProgramData` under an
+  Adobe-shaped path and processes the same profile twice.
+- **Adobe's own install metadata is captured first**, into the log folder, before any tree that
+  contains it can be deleted.
+- **Self-elevation** via UAC with a **fail-closed `-WhatIf` relay**, **preview mode**
+  (`-ListOnly`), and full `-WhatIf` support.
+
+### Requirements
+
+- Windows 10/11
+- Windows PowerShell 5.1 (built in) — no modules required
+- Administrator rights (the script self-elevates via UAC)
+
+### Usage
+
+```powershell
+# Preview the census — every product with its SAP code and classification. Changes nothing:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1 -ListOnly
+
+# Interactive: pick from a numbered menu, prompting before each step:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1
+
+# One product by SAP code, unattended:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1 -Product PHSP -StopAdobe -Force
+
+# Two products by name — -Product matches display names as well as SAP codes:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1 -Product Photoshop,Illustrator -StopAdobe -Force
+
+# Every application, then a second pass to reclaim the shared runtimes:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1 -All -StopAdobe -Force
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1 -All -IncludeSharedComponents -Force
+
+# Full wipe including user presets, workspaces and the Camera Raw library:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1 -All -IncludeSharedComponents -RemoveUserData -RemoveShellExtensions -RemoveResidualRegistry -StopAdobe -Force
+
+# Turning the default-on removal OFF needs -Command, not -File (see the note below):
+powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-Adobe.ps1' -RemoveResidualFiles:$false -Product PHSP"
+```
+
+**Every opt-in is a switch — pass them bare, like `-Force`.** Not `-RemoveUserData:$true`. This
+is not cosmetic: `powershell.exe -File` passes every argument as a literal **string**, and a
+`bool` parameter's argument transformation rejects the string `"$true"` with *"Boolean
+parameters accept only Boolean values and numbers"*. Measured: **no** `-File` form binds a
+`bool` — not `:$true`, not `:1`, not `:0`, not `:true`. The single default-on `bool`
+(`-RemoveResidualFiles`) is only ever passed to turn cleanup *off*, and that needs the
+`-Command` form shown above.
+
+**`-Product Photoshop,Illustrator` works, but not for the reason you would expect.**
+`powershell.exe -File` does **not** split a comma-separated value into an array — measured, it
+binds `$Product` to the single string `"Photoshop,Illustrator"`, which matches no product. That
+is the same `-File` literal-string limitation that stops a `bool` parameter binding. Rather than
+document a workaround for the invocation form every example here uses, the script splits the
+value itself — and tries a whole-token match **first**, so a product whose real name contains a
+comma is never split out from under you.
+
+Run `-ListOnly` first. It is the safety gate, and it prints the exact `-Product` arguments to
+use — including for the nine products that have no name in Add/Remove Programs at all.
+
+**Two passes are normal, and not a bug.** Shared runtimes stay refcounted until the last
+application referencing them is gone, so removing one application of two legitimately leaves
+them in place with exit code `130`. Re-run with `-IncludeSharedComponents` once the last
+application is removed.
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-Product` | string[] | — | Which products to remove. Accepts SAP codes (`PHSP`), display names, or fragments, case-insensitively and in any mixture. A selector that matches zero or more than one product aborts the run rather than guessing. |
+| `-All` | switch | off | Uninstall every discovered Adobe **application**. Shared components are still excluded unless `-IncludeSharedComponents` is also passed. |
+| `-IncludeSharedComponents` | switch | off | Also attempt the shared runtimes — Camera Raw, CoreSync, the colour-profile bundles, UXP WebView Support. Safe rather than dangerous, because Adobe refcounts them and answers `130` for anything still in use; off by default only because attempting them while an application survives is a no-op that fills the log with refusals. |
+| `-RemoveUserData` | switch | off | **Opt-in.** Also delete `%APPDATA%\Adobe`, `%LOCALAPPDATA%\Adobe`, `LocalLow\Adobe` and `ProgramData\Adobe\CameraRaw`. Measured on this platform: **2.24 GB** in `CameraRaw` alone, including user-authored presets under `Settings` and `SaveOptions`, plus 133 MB of Illustrator/Photoshop workspaces and installed fonts in `Roaming`. |
+| `-RemoveShellExtensions` | switch | off | **Opt-in.** Remove CoreSync's Explorer integration. These carry no vendor string: the handler is registered as `AccExt`, and the three icon-overlay entries have value names beginning with **three leading spaces** (`" AccExtIco1"`). Every candidate is resolved through its CLSID to a DLL path and removed only when that path lies under an Adobe root. |
+| `-RemoveResidualFiles` | bool | `$true` | Delete the removed products' own program folders and orphaned shortcuts, and — only once **no** Adobe product remains registered — the shared plumbing under `Common Files\Adobe` and `ProgramData\Adobe`. |
+| `-RemoveResidualRegistry` | switch | off | **Opt-in.** Also delete `HKLM:\SOFTWARE\Adobe`, its WOW6432Node twin, `HKCU:\SOFTWARE\Adobe`, the App Paths entries in **both** registry views, and the `adobe+ilst` / `adobe+phxs` URL protocol handlers. Skipped while any Adobe product is still registered. |
+| `-StopAdobe` | switch | off | Close running Adobe applications first. Each window is asked to close and only forced after it declines — Adobe's own engine refuses to force-kill these precisely to protect unsaved work. Without it the script aborts when Adobe is running. |
+| `-ListOnly` | switch | off | Run the census, print every product with its SAP code and classification, and exit. No changes. |
+| `-Force` | switch | off | Fully non-interactive. **Requires `-Product` or `-All`** — there is no menu to answer, and the script refuses to assume you meant everything. |
+| `-LogPath` | string | `%TEMP%\...` | Override the transcript log path. Resolved to an absolute path before elevation. |
+
+### Safety
+
+- **Never `msiexec` for a Creative Cloud product.** The `--productAdobeCode` value *looks* like a
+  GUID and is not one; handing it to `msiexec /x` is meaningless. The MSI path exists in the
+  script for Acrobat and Reader only, and is selected by the shape of the registered
+  `UninstallString`, not by guessing.
+- **The Adobe Creative Cloud Cleaner Tool is never invoked, and never downloaded.** It is a
+  blunt instrument that strips shared components other Adobe products still depend on. When the
+  supported path fails, the script stops and points at Adobe's own log so you can decide.
+- **No PDF association is ever rewritten.** The script never writes to `HKCR\.pdf` or to
+  `…\Explorer\FileExts\.pdf\UserChoice`. After a PDF handler is removed Windows falls back to
+  the remaining registered handlers on its own; hand-editing `UserChoice` is what leaves a
+  machine with *no* working PDF association.
+- **No Winsock, WFP or hosts-file changes.** Unlike `Uninstall-FortiClient.ps1`, there is no
+  driver stage here at all — verified on this platform, Adobe ships **no** kernel driver and
+  **no** `oem*.inf` driver package, so that machinery would be pure risk with no benefit.
+- **Five refusals guard every deletion**: drive roots, paths with fewer than three segments,
+  exact matches on protected system roots, paths that do not name Adobe, and — for the shared
+  plumbing — any Adobe product still being registered.
+- **The Microsoft-signed payload is reported, not hidden.** `Common Files\Adobe` contains
+  Adobe's *private* copy of the Edge WebView2 runtime — 557 MB of Microsoft-signed code on this
+  platform. It goes with the folder, and the script says so in the log rather than presenting it
+  as Adobe code.
+
+### Logging
+
+Every run writes a full transcript to `%TEMP%\Uninstall-Adobe_<timestamp>.log`, and copies
+Adobe's own install metadata (`Common Files\Adobe\Installers`, `ProgramData\Adobe\Installer`)
+into `Uninstall-Adobe_<timestamp>_metadata\` beside it **before** anything is removed — that
+metadata is the only on-disk record of what was installed, and it lives inside trees the script
+may later delete. The capture is named from the log file so one run is always one identifiable
+pair; its size (~7 MB) is reported in the transcript rather than copied silently.
+
+**Old runs are pruned automatically, keeping the 5 most recent.** Nothing else ever cleans these
+up: measured, 42 transcripts and 2 captures had accumulated in `%TEMP%` after a single afternoon.
+Only artifacts this script created are considered — matched by an anchored pattern, never a
+`Uninstall*` glob, because `%TEMP%` is full of other tools' files — the run in progress is
+explicitly protected, and every deletion is named in the transcript.
+
+When something fails, the script points at Adobe's own log:
+
+```powershell
+Get-Content 'C:\Program Files (x86)\Common Files\Adobe\Installers\Install.log' -Encoding Unicode -Tail 200
+```
+
+**`-Encoding Unicode` is required** — the file is UTF-16LE, and reading it as UTF-8 yields
+interleaved nulls that look like corruption.
+
+### Notes and limitations
+
+- **Uninstalling does not deactivate your licence.** It does not free a seat on a named-user
+  plan. Sign out in the Creative Cloud desktop app first, or deactivate at `account.adobe.com`.
+- **Application preferences are destroyed by Adobe, not by this script.** The HyperDrive
+  uninstall workflow sets `deleteUserPreferences=true` internally and exposes no flag to turn it
+  off. The script warns before the first removal; `-RemoveUserData` is a separate, larger step.
+- The Creative Cloud desktop app is handled if present but is **not** assumed to exist — verified
+  on this platform it is absent, and "Adobe Creative Cloud" and "Adobe Creative Cloud Experience"
+  are different products. Every step keyed on it is a guarded no-op.
+- **Adobe Genuine Service** (`AGSService`, `AdobeGCClient`) is removed only if present. Verified
+  on this platform it is absent — and note that a case-insensitive search for "Genuine" on this
+  machine hits **Autodesk's** Genuine Service, which is why nothing here matches on that word.
+- Shell-extension cleanup can leave `CoreSync_x64.dll` on disk: Explorer holds it open. The
+  registrations go immediately; the file goes on the next sweep or the next sign-in.
+- No System Restore point and no registry export are taken, matching the other scripts here.
+- This tool is not affiliated with or endorsed by Adobe. "Adobe", "Photoshop", "Illustrator",
+  "Acrobat", "Camera Raw" and "Creative Cloud" are trademarks of Adobe Inc.
 
 ---
 

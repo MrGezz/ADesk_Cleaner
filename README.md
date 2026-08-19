@@ -1,7 +1,8 @@
 # ADesk_Cleaner
 
-Six PowerShell uninstallers for Windows — four for Autodesk environments, one for Fortinet
-FortiClient, one for Adobe Creative Cloud — plus a Revit cache cleaner and a small
+Seven PowerShell uninstallers for Windows — four for Autodesk environments, one for Fortinet
+FortiClient, one for Adobe Creative Cloud, one for the previous machine's driver stack on a
+Windows install that was moved to new hardware — plus a Revit cache cleaner and a small
 general-purpose cleanup utility. Each uninstaller targets a different layer of the stack, and
 each is registry-driven, preview-first, and fully logged.
 
@@ -13,10 +14,11 @@ each is registry-driven, preview-first, and fully logged.
 | [`Uninstall-PyRevit-Complete.ps1`](Uninstall-PyRevit-Complete.ps1) | **pyRevit** and **pyRevit CLI** — clones, add-in manifests, Windows installation registrations, Start Menu entries, `PATH` entries | Optional |
 | [`Uninstall-FortiClient.ps1`](Uninstall-FortiClient.ps1) | **Fortinet FortiClient** — the MSI, plus the network-stack residue it orphans: kernel drivers, driver-store packages, the virtual adapter devnodes, firewall rules and config hives | Required (self-elevates) |
 | [`Uninstall-Adobe.ps1`](Uninstall-Adobe.ps1) | **Adobe Creative Cloud products you select** — Photoshop, Illustrator, Acrobat and the rest, by SAP code or name, via Adobe's own HyperDrive uninstaller. **Preserves shared runtimes** other Adobe apps still reference | Required (self-elevates) |
+| [`Remove-LegacyHardwareResidue.ps1`](Remove-LegacyHardwareResidue.ps1) | **The previous machine's platform stack**, on a Windows install carried across to new hardware — ASUS/Armoury Crate and Intel chipset, graphics, audio and power packages, their services, scheduled tasks, phantom devnodes and folders. **Refuses any vendor whose hardware is still present** | Required (self-elevates; `-ListOnly` does not) |
 | [`Clear-RevitCache.ps1`](Clear-RevitCache.ps1) | Not an uninstaller — **keeps Revit installed** and clears its per-user caches: accelerator cache, web caches, journal history, and (opt-in) the cloud collaboration cache and the Home screen's Recent models page | None |
 | [`Clean-Directory.ps1`](Clean-Directory.ps1) | Not an uninstaller — a recursive sweep for build junk (`*.bak`, `__pycache__`) under a directory you name | None |
 
-> All six uninstallers share the same philosophy: discover what is installed from the registry
+> All seven uninstallers share the same philosophy: discover what is installed from the registry
 > rather than from hardcoded paths or GUIDs, invoke the vendor's own uninstaller wherever one
 > exists, preview before acting, refuse to touch shared components, and log everything.
 
@@ -53,6 +55,12 @@ each is registry-driven, preview-first, and fully logged.
 | Reclaiming the multi-GB cloud model cache after a project ships | `Clear-RevitCache.ps1 -IncludeCollaborationCache -OlderThanDays 30` |
 | Emptying the **Recent models** page on Revit's Home screen | `Clear-RevitCache.ps1 -ClearRecentFiles` |
 | Clearing `*.bak` / `__pycache__` out of a project tree | `Clean-Directory.ps1` |
+| Moved this Windows install to a new motherboard, and the old machine's drivers are still in the driver store | `Remove-LegacyHardwareResidue.ps1 -ListOnly` first, then without `-ListOnly` |
+| Vendor tasks (`\ASUS\...`) still firing at every logon against hardware that is gone | `Remove-LegacyHardwareResidue.ps1 -Scope Startup` |
+| Task Manager's Startup tab lists programs that are no longer installed | `Remove-LegacyHardwareResidue.ps1 -Scope Startup` — those are orphaned `StartupApproved` flags |
+| A desktop that shows a battery icon, or applies on-battery power policy | `Remove-LegacyHardwareResidue.ps1 -Scope Power -RemoveGhostDevices` — phantom ACPI battery devnodes from a laptop image |
+| Reclaiming the ~1 GB Intel integrated-graphics driver package on a machine with no Intel GPU | `Remove-LegacyHardwareResidue.ps1 -Scope Display` |
+| Device Manager's "show hidden devices" is full of greyed-out hardware you no longer own | `Remove-LegacyHardwareResidue.ps1 -RemoveGhostDevices` — scoped to the swept vendors, **not** a blanket ghost purge |
 | Wiping a machine completely | pyRevit first, then Revit, then Navisworks, then AutoCAD |
 
 Removing pyRevit before Revit lets pyRevit detach from each Revit installation while its CLI
@@ -63,8 +71,8 @@ touches anything outside the pyRevit footprint, so it needs none.)
 
 ## Exit codes
 
-The three Autodesk uninstallers, `Uninstall-FortiClient.ps1` and `Uninstall-Adobe.ps1` share one
-contract:
+The three Autodesk uninstallers, `Uninstall-FortiClient.ps1`, `Uninstall-Adobe.ps1` and
+`Remove-LegacyHardwareResidue.ps1` share one contract:
 
 | Code | Meaning |
 |---|---|
@@ -1242,6 +1250,159 @@ interleaved nulls that look like corruption.
 - No System Restore point and no registry export are taken, matching the other scripts here.
 - This tool is not affiliated with or endorsed by Adobe. "Adobe", "Photoshop", "Illustrator",
   "Acrobat", "Camera Raw" and "Creative Cloud" are trademarks of Adobe Inc.
+
+---
+
+## `Remove-LegacyHardwareResidue.ps1` — the previous machine's driver stack
+
+When a Windows installation moves to a new motherboard, or is restored from an image taken on a
+different machine, the old machine's platform stack does not uninstall itself. It goes dormant:
+services flip to `Disabled`, devnodes become "not present" phantoms, and the driver packages stay
+in the driver store forever, because nothing in Windows ever reclaims them. Meanwhile the vendor's
+scheduled tasks keep firing at every logon against hardware that is gone.
+
+This script removes that residue for the two vendors that leave the most of it — ASUS
+(Armoury Crate / ROG / ASUS System Control Interface) and Intel (chipset, Management Engine, RST,
+graphics, Smart Sound audio, Dynamic Tuning) — plus the generic startup residue any migration
+leaves behind.
+
+### The central fact
+
+A driver package is safe to remove only if **no connected device is bound to it**, and that is a
+question with an exact answer:
+
+```
+pnputil /enum-devices /connected /drivers
+```
+
+One call returns every driver package bound to hardware that is present right now. That set is
+computed first, and it is the gate every removal passes through. Nothing is removed because its
+name contains `intel` or `asus`; things are removed because the machine itself reports that
+nothing is using them.
+
+The gate **fails closed**. If the binding map cannot be computed, driver-store removal is disabled
+for the whole run and the script says so — an empty binding map is indistinguishable from "nothing
+is in use", and acting on that reading would authorise deleting every driver on the machine.
+
+### Three hard refusals
+
+Checked before anything is removed, and reported with their evidence:
+
+| Refusal | Why |
+|---|---|
+| The current baseboard/system manufacturer matches the vendor | You do not sweep ASUS on an ASUS board |
+| The current CPU is `GenuineIntel` | The Intel platform stack is current hardware, not residue |
+| The vendor has **any** driver package bound to a connected device | That vendor's hardware is present, whatever the other two checks say |
+
+A refusal does not fail the run: the remaining buckets still process. Together these make the
+script safe to run on a machine it was not designed against, which a hardcoded package list would
+not be.
+
+### Seven traps it is built around
+
+1. **`intel` as a substring matches inbox Windows boot drivers.** On a machine with an AMD Ryzen
+   CPU and no Intel silicon at all, `intelpep` and `IntelPMT` are **running**, at `Start=Boot`.
+   They ship with Windows. So do `intelide`, `iaStorV` and `iaStorAVC`. A service is only removed
+   when it is owned by a driver package that is itself being removed, or when its binary is
+   provably vendor-signed **and** provably orphaned.
+2. **`oemNN.inf` numbers are recycled.** Windows reclaims an oem slot after a package is removed
+   and hands the number to another vendor. Every package is re-verified against a freshly-read
+   driver-store listing immediately before deletion — same published name, same original INF, same
+   provider, still unbound. If any of the four has drifted, the deletion is refused, not retried.
+3. **The recorded uninstall string for a Burn-registered MSI is an *install* verb.** Four ASUS HAL
+   products register their MSI child as `MsiExec.exe /I{guid}` — `/I`, not `/X`. Executing that
+   string verbatim asks Windows Installer to **install** the product. The script rewrites `/I` to
+   `/X` and appends `/qn /norestart`.
+4. **The same product is registered twice**, once as a Burn bundle in the Package Cache and once as
+   the MSI it installed. Removing the child first strands the bundle, so bundles always run first.
+5. **Realtek is current hardware, even when the INF says ASUS.** A board whose audio, NIC and Wi-Fi
+   are all Realtek also carries an ASUS-laptop-specific Dolby APO extension whose *provider* is
+   Realtek. Vendor attribution alone gets this wrong in both directions; the live-binding gate gets
+   it right without a special case.
+6. **An InstallShield uninstall needs source media that this script deleted.** Two ASUS SDK
+   entries record an `InstallSource` *under `C:\Program Files\ASUS`* — inside the very tree being
+   cleaned. Running `setup.exe -removeonly` against them blocks the whole run on a modal
+   **"Setup Needs The Next Disk … `layout.bin`"** dialog whose banner reads *"configuring your new
+   software **installation**"*, and cancelling returns `-5006 (0x80030020)` with the registration
+   untouched — so the next run finds the same unclean machine and prompts again, forever. The
+   source is checked *before* launching anything, the uninstaller is never started when it cannot
+   succeed, and the entry is removed by registration instead. Relatedly, the verdict on every
+   uninstall is read from the **registry** afterwards, not from the exit code: vendor uninstallers
+   report success while leaving registrations behind, and failure after removing everything.
+7. **A desktop with phantom battery devnodes still behaves like a laptop.** Migrated-from-laptop
+   images keep `ACPI\PNP0C0A` and `ACPI\ACPI0003` phantoms, which is why a desktop can surface
+   battery UI and apply on-battery power policy. Removed under `-Scope Power`.
+
+### Scopes
+
+Buckets are independent, so `-Scope Startup,Power` is a valid and useful run.
+
+| Scope | Removes |
+|---|---|
+| `Startup` | Vendor scheduled tasks, Run-key entries whose target is provably missing, orphaned `StartupApproved` flags |
+| `Asus` | Programs, services, driver packages, the `AsIO3` legacy I/O driver, Appx HALs, folders, hives |
+| `IntelChipset` | Management Engine, DAL, LMS, RST, Serial IO, GNA, Bluetooth, Wi-Fi, PCH system packages |
+| `Display` | `iigd` / `igcc` / `cui` packages, Graphics Command Center data, shader cache, phantom display adapters |
+| `Audio` | Intel Smart Sound Technology (`cAVS`), Display Audio, SST for USB/Bluetooth, vendor audio APO extensions |
+| `Power` | Intel Dynamic Tuning and Innovation Platform Framework, phantom battery / AC adapter devnodes |
+| `All` | Every bucket above. The default |
+
+### Usage
+
+```powershell
+# The recommended first run. Full census with sizes and evidence, no changes, NO ELEVATION NEEDED:
+.\Remove-LegacyHardwareResidue.ps1 -ListOnly
+
+# Just stop the dead vendor tasks firing at every logon. Fast and reversible:
+.\Remove-LegacyHardwareResidue.ps1 -Scope Startup
+
+# Full preview of the default run, showing every command that would be issued:
+.\Remove-LegacyHardwareResidue.ps1 -WhatIf
+
+# The ASUS stack and the Intel graphics stack, including their phantom devnodes:
+.\Remove-LegacyHardwareResidue.ps1 -Scope Asus,Display -RemoveGhostDevices
+
+# Everything, non-interactive, including the vendor config hives:
+.\Remove-LegacyHardwareResidue.ps1 -Force -RemoveResidualRegistry
+
+# Second pass after the reboot, to sweep the files the kernel was holding open:
+.\Remove-LegacyHardwareResidue.ps1 -Force
+
+# Turning a default-on removal OFF needs -Command, not -File (see the note below):
+powershell -Command ".\Remove-LegacyHardwareResidue.ps1 -RemoveDriverPackages:`$false"
+```
+
+`-ListOnly` is deliberately usable **unelevated**. The census reads registry hives, the driver
+store and the PnP tree, all of which are world-readable, and forcing a UAC prompt to answer "what
+would you remove?" is the fastest way to make an operator skip the one step that matters.
+
+### What it will not do
+
+* It will not pass `/force` to `pnputil /delete-driver`. If a package will not come out cleanly,
+  something is still using it, and that is precisely what the gate exists to protect.
+* It will not remove "every hidden device". `-RemoveGhostDevices` is scoped to devices belonging to
+  the swept vendors — the blanket recipe also eats unplugged USB devices, Bluetooth pairings and
+  volume snapshots, which is how people lose working peripherals.
+* It will not delete a Run-key entry whose target it could not resolve. A command like
+  `...\DesktopConnector.Applications.Tray.exe StartType:Auto` passes an unquoted argument with no
+  leading dash to split on; a naive parser reads the whole string as a path, finds no file, and
+  condemns a healthy entry. Unresolvable targets are reported and left alone.
+* It will not launch an uninstaller that cannot succeed. An InstallShield `setup.exe` whose
+  recorded `InstallSource` is gone will block the entire run on a modal disk prompt no one can
+  answer. Those are detected in the census, reported as `NOT RUNNABLE`, and handled by
+  `-RemoveOrphanRegistrations` instead — which deletes the registration and the cached installer
+  folder, the only reachable outcome. Pass `-RemoveOrphanRegistrations:$false` to leave them
+  listed in Add/Remove Programs; a run that does so and finds any exits `3`.
+* It will not touch power **schemes**. A migrated image often carries a duplicate
+  "Ultimate Performance" GUID, but the duplicate and the built-in template are not reliably
+  distinguishable, and the space at stake is zero.
+
+### Expect a reboot
+
+Loaded kernel drivers hold their `.sys` files open until the machine restarts, so a first run
+removes registrations and reports what is pending, then exits `3010`. Re-run after the reboot to
+finish the file sweep; the second pass is fast and usually reports only "already gone". Every step
+is idempotent and treats "already gone" as success.
 
 ---
 

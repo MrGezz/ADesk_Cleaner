@@ -1,10 +1,11 @@
 # ADesk_Cleaner
 
-Seven PowerShell uninstallers for Windows — four for Autodesk environments, one for Fortinet
-FortiClient, one for Adobe Creative Cloud, one for the previous machine's driver stack on a
-Windows install that was moved to new hardware — plus a Revit cache cleaner and a small
-general-purpose cleanup utility. Each uninstaller targets a different layer of the stack, and
-each is registry-driven, preview-first, and fully logged.
+Eight PowerShell uninstallers for Windows — four for Autodesk environments, one for Fortinet
+FortiClient, one for Adobe Creative Cloud, one for every previous build's driver stack on a
+Windows install that moves from machine to machine, one for Windows' own bloat — plus a Revit
+cache cleaner, a Windows Search index reset, and a small general-purpose cleanup utility. Each
+uninstaller targets a different layer of the stack, and each is registry-driven, preview-first,
+and fully logged.
 
 | Script | Removes | Elevation |
 |---|---|---|
@@ -14,13 +15,32 @@ each is registry-driven, preview-first, and fully logged.
 | [`Uninstall-PyRevit-Complete.ps1`](Uninstall-PyRevit-Complete.ps1) | **pyRevit** and **pyRevit CLI** — clones, add-in manifests, Windows installation registrations, Start Menu entries, `PATH` entries | Optional |
 | [`Uninstall-FortiClient.ps1`](Uninstall-FortiClient.ps1) | **Fortinet FortiClient** — the MSI, plus the network-stack residue it orphans: kernel drivers, driver-store packages, the virtual adapter devnodes, firewall rules and config hives | Required (self-elevates) |
 | [`Uninstall-Adobe.ps1`](Uninstall-Adobe.ps1) | **Adobe Creative Cloud products you select** — Photoshop, Illustrator, Acrobat and the rest, by SAP code or name, via Adobe's own HyperDrive uninstaller. **Preserves shared runtimes** other Adobe apps still reference | Required (self-elevates) |
-| [`Remove-LegacyHardwareResidue.ps1`](Remove-LegacyHardwareResidue.ps1) | **The previous machine's platform stack**, on a Windows install carried across to new hardware — ASUS/Armoury Crate and Intel chipset, graphics, audio and power packages, their services, scheduled tasks, phantom devnodes and folders. **Refuses any vendor whose hardware is still present** | Required (self-elevates; `-ListOnly` does not) |
+| [`Remove-LegacyHardwareResidue.ps1`](Remove-LegacyHardwareResidue.ps1) | **Every previous build's platform stack**, on a Windows install that moves from machine to machine — a catalogue of ASUS, Intel, AMD, NVIDIA, Gigabyte, MSI, ASRock, the laptop OEMs and their component vendors: driver packages, services, scheduled tasks, phantom devnodes and folders; plus the phantom PCI/ACPI/disk/monitor devnodes of old builds, and a discovery pass for vendors it has no profile for. **Refuses, per bucket, any vendor whose hardware is still present** | Required (self-elevates; `-ListOnly` does not) |
+| [`Remove-WindowsBloat.ps1`](Remove-WindowsBloat.ps1) | **Windows' own bloat** — the pre-installed Store apps, telemetry, tips and ads, Copilot / Recall / Click To Do, Bing in search, Widgets — as a census-first run that **backs up every registry value it changes** and puts them all back with `-Restore` | Required (self-elevates; `-ListOnly` does not) |
 | [`Clear-RevitCache.ps1`](Clear-RevitCache.ps1) | Not an uninstaller — **keeps Revit installed** and clears its per-user caches: accelerator cache, web caches, journal history, and (opt-in) the cloud collaboration cache and the Home screen's Recent models page | None |
+| [`Reset-SearchIndex.ps1`](Reset-SearchIndex.ps1) | Not an uninstaller — resets and rebuilds the **Windows Search** index, and lifts the self-throttling that otherwise makes the rebuild take days. Writes one owner-locked registry key that not even SYSTEM can write, then **restores its original ACL and owner** | Required (self-elevates; `-Status` and `-Analyze` do not) |
 | [`Clean-Directory.ps1`](Clean-Directory.ps1) | Not an uninstaller — a recursive sweep for build junk (`*.bak`, `__pycache__`) under a directory you name | None |
 
-> All seven uninstallers share the same philosophy: discover what is installed from the registry
+> All eight uninstallers share the same philosophy: discover what is installed from the registry
 > rather than from hardcoded paths or GUIDs, invoke the vendor's own uninstaller wherever one
 > exists, preview before acting, refuse to touch shared components, and log everything.
+
+Every script has a matching `.cmd` launcher beside it — `Uninstall-Revit.cmd` next to
+`Uninstall-Revit.ps1`, and so on. Each runs its script in Windows PowerShell 5.1 with the
+execution policy bypassed for that process only, and forwards whatever arguments you give it:
+
+```
+Uninstall-Revit.cmd -ProductYear 2025 -ListOnly
+```
+
+Three things to know about them. They use `-File`, so anything below marked *needs `-Command`*
+— turning a default-on `bool` off — still has to be typed out against `powershell.exe`. Started
+from Explorer they pause at the end so the output can be read; started from a cmd prompt they
+return the script's exit code without pausing (PowerShell runs `.cmd` files through `cmd /c`,
+which looks like Explorer to the launcher, so expect the pause there too). And for the six
+self-elevating uninstallers, **right-click → Run as administrator** is worth the extra click:
+started unelevated they still work, but the real run happens in a second window that closes
+when it finishes, leaving only the transcript in `%TEMP%` to read.
 
 ## Which script do I need?
 
@@ -55,12 +75,27 @@ each is registry-driven, preview-first, and fully logged.
 | Reclaiming the multi-GB cloud model cache after a project ships | `Clear-RevitCache.ps1 -IncludeCollaborationCache -OlderThanDays 30` |
 | Emptying the **Recent models** page on Revit's Home screen | `Clear-RevitCache.ps1 -ClearRecentFiles` |
 | Clearing `*.bak` / `__pycache__` out of a project tree | `Clean-Directory.ps1` |
+| Start menu or Explorer search returns nothing, or misses files that plainly exist | `Reset-SearchIndex.ps1` |
+| The index has been "still indexing" for days and never finishes | `Reset-SearchIndex.ps1 -TurboOnly` — the indexer backs off every time you touch the PC; this stops that without discarding the index |
+| Wanting to know *why* the item count is in the millions before rebuilding | `Reset-SearchIndex.ps1 -Analyze` — no elevation; reports the folders inflating the count |
+| A dev machine where `node_modules` / `.git` / package caches are being indexed | `Reset-SearchIndex.ps1 -Mode Classic` — user libraries only, or exclude the parent folder in Indexing Options |
+| `SearchIndexer.exe` competing for CPU and disk long after the rebuild finished | `Reset-SearchIndex.ps1 -RevertTurbo` — turbo was left on |
+| A reset was interrupted and Windows Search is now stopped or disabled | `Reset-SearchIndex.ps1 -Repair` — restarts the service without touching the index |
+| `DisableBackOff` cannot be written even from an elevated prompt | `Reset-SearchIndex.ps1 -TakeOwnership` — on Windows 11 23H2+ the key is owner-locked to `NT SERVICE\WSearch`; the script restores the original ACL afterwards |
+| A fresh Windows full of Candy Crush, the Bing apps, Copilot, Widgets, tips and telemetry | `Remove-WindowsBloat.ps1 -ListOnly` first, then without it |
+| Undo a debloat | `Remove-WindowsBloat.ps1 -Restore <backup.json>` — every registry value goes back exactly as captured; apps come back from the Store |
+| "Some settings are managed by your organization" after a debloat | Those are the tweaks the census tags `[POLICY]`; `-Restore` removes them |
+| Debloat the privacy and AI groups but keep every app | `Remove-WindowsBloat.ps1 -Group Privacy,AI -RemoveApps:$false` (needs `-Command`, see the note) |
 | Moved this Windows install to a new motherboard, and the old machine's drivers are still in the driver store | `Remove-LegacyHardwareResidue.ps1 -ListOnly` first, then without `-ListOnly` |
 | Vendor tasks (`\ASUS\...`) still firing at every logon against hardware that is gone | `Remove-LegacyHardwareResidue.ps1 -Scope Startup` |
 | Task Manager's Startup tab lists programs that are no longer installed | `Remove-LegacyHardwareResidue.ps1 -Scope Startup` — those are orphaned `StartupApproved` flags |
 | A desktop that shows a battery icon, or applies on-battery power policy | `Remove-LegacyHardwareResidue.ps1 -Scope Power -RemoveGhostDevices` — phantom ACPI battery devnodes from a laptop image |
 | Reclaiming the ~1 GB Intel integrated-graphics driver package on a machine with no Intel GPU | `Remove-LegacyHardwareResidue.ps1 -Scope Display` |
 | Device Manager's "show hidden devices" is full of greyed-out hardware you no longer own | `Remove-LegacyHardwareResidue.ps1 -RemoveGhostDevices` — scoped to the swept vendors, **not** a blanket ghost purge |
+| Same system drive through several desktop builds: the old CPU's processor nodes, the old board's PCI bridges, old disks and monitors all still listed | `Remove-LegacyHardwareResidue.ps1 -Scope Platform -RemoveGhostDevices` — bus-enumerated devnodes only; never USB, HID or Bluetooth |
+| Swapped GPU vendors (Radeon → GeForce or back) and the old graphics package is still in the driver store | `Remove-LegacyHardwareResidue.ps1 -Scope Display` — a present CPU of that vendor no longer shields its dead graphics package |
+| A laptop image now running on a desktop: Acer/Dell/HP/Lenovo utilities, ELAN/Synaptics touchpad drivers, laptop Wi-Fi, Insyde firmware packages | `Remove-LegacyHardwareResidue.ps1 -Scope LaptopOem` — OEMs are swept only with ghost evidence that the image came from their machine |
+| Residue from a vendor the script has no profile for | `Remove-LegacyHardwareResidue.ps1 -ListOnly` reports every driver-store provider with zero live bindings; `-Scope OtherVendors` removes their platform-class packages |
 | Wiping a machine completely | pyRevit first, then Revit, then Navisworks, then AutoCAD |
 
 Removing pyRevit before Revit lets pyRevit detach from each Revit installation while its CLI
@@ -71,8 +106,8 @@ touches anything outside the pyRevit footprint, so it needs none.)
 
 ## Exit codes
 
-The three Autodesk uninstallers, `Uninstall-FortiClient.ps1`, `Uninstall-Adobe.ps1` and
-`Remove-LegacyHardwareResidue.ps1` share one contract:
+The three Autodesk uninstallers, `Uninstall-FortiClient.ps1`, `Uninstall-Adobe.ps1`,
+`Remove-LegacyHardwareResidue.ps1` and `Remove-WindowsBloat.ps1` share one contract:
 
 | Code | Meaning |
 |---|---|
@@ -112,6 +147,23 @@ and `0` otherwise.
 `3` partial failure (something could not be deleted, usually a file still open), `2` nothing to
 clear, `1` aborted (Revit running without `-StopRevit`, or an invalid `-LogPath`). It never
 returns `3010` — clearing a cache never requires a reboot.
+
+`Remove-WindowsBloat.ps1` returns `2` when every selected tweak is already applied and no
+selected app is installed, `1` for an unknown tweak or group name or a missing `-Restore` file,
+and never `3010` — it restarts Explorer instead and asks you to sign out, because the Settings
+app and the Start menu read several of these values at sign-in.
+
+`Reset-SearchIndex.ps1` uses only `0` and `1`. It returns `1` for the four cases in which it
+cannot do the thing you asked: elevation was declined, `-Monitor` was given while the service
+is not running, `-Repair` could not start the service (or `wsearch` is not registered at all),
+and — the one that matters — **a reset that wiped the index but could not bring the service back
+up**. Everything else, including answering `n` at the confirmation prompt, exits `0`. It never
+returns `3010`; a rebuild does not need a reboot, only time.
+
+> **Do not drive this one by exit code.** When it self-elevates it starts a *new* elevated
+> window with `-NoExit` and the original shell exits `0` immediately — so the code you get back
+> describes the launch, not the run, and the elevated window never closes to report one at all.
+> Start it from an already-elevated prompt if you need the exit code to mean anything.
 
 ---
 
@@ -1253,7 +1305,7 @@ interleaved nulls that look like corruption.
 
 ---
 
-## `Remove-LegacyHardwareResidue.ps1` — the previous machine's driver stack
+## `Remove-LegacyHardwareResidue.ps1` — every previous build's driver stack
 
 When a Windows installation moves to a new motherboard, or is restored from an image taken on a
 different machine, the old machine's platform stack does not uninstall itself. It goes dormant:
@@ -1261,10 +1313,21 @@ services flip to `Disabled`, devnodes become "not present" phantoms, and the dri
 in the driver store forever, because nothing in Windows ever reclaims them. Meanwhile the vendor's
 scheduled tasks keep firing at every logon against hardware that is gone.
 
-This script removes that residue for the two vendors that leave the most of it — ASUS
-(Armoury Crate / ROG / ASUS System Control Interface) and Intel (chipset, Management Engine, RST,
-graphics, Smart Sound audio, Dynamic Tuning) — plus the generic startup residue any migration
-leaves behind.
+This script removes that residue for a **catalogue** of platform vendors — the ones a reused
+system drive accumulates across desktop builds and laptop images: ASUS (Armoury Crate / ROG /
+ASUS System Control Interface), Intel (chipset, Management Engine, RST, graphics, Smart Sound
+audio, Dynamic Tuning), AMD (chipset and Radeon), NVIDIA, Gigabyte, MSI, ASRock, the laptop OEMs
+(Acer, Dell, HP, Lenovo) and the component vendors that only ever ship inside a laptop (ELAN,
+Synaptics, Insyde, Qualcomm Atheros, Killer, Ricoh, NXP, Conexant, Alps). Around the catalogue
+sit three things that do not need a profile: the generic startup residue any migration leaves
+behind, the phantom devnodes of every previous build's bus-enumerated hardware (`-Scope
+Platform`), and a discovery pass that reports any *other* driver-store provider with zero live
+bindings, so the next build's vendor is caught before it has a profile (`-Scope OtherVendors`).
+
+Every profile is data in one table — provider pattern, chassis/CPU/GPU patterns that mean "this
+is current hardware", the classes its packages may be swept from, service names, task paths,
+folders, hives — and the planner never special-cases a vendor by name. Adding a vendor is adding
+a row.
 
 ### The central fact
 
@@ -1284,15 +1347,26 @@ The gate **fails closed**. If the binding map cannot be computed, driver-store r
 for the whole run and the script says so — an empty binding map is indistinguishable from "nothing
 is in use", and acting on that reading would authorise deleting every driver on the machine.
 
-### Three hard refusals
+### Four hard refusals, per bucket
 
-Checked before anything is removed, and reported with their evidence:
+Checked before anything is removed, reported with their evidence, and applied to the
+**(vendor, bucket) pair** rather than to the vendor:
 
-| Refusal | Why |
-|---|---|
-| The current baseboard/system manufacturer matches the vendor | You do not sweep ASUS on an ASUS board |
-| The current CPU is `GenuineIntel` | The Intel platform stack is current hardware, not residue |
-| The vendor has **any** driver package bound to a connected device | That vendor's hardware is present, whatever the other two checks say |
+| Refusal | Refuses | Why |
+|---|---|---|
+| The current baseboard/system manufacturer matches the vendor | every bucket | You do not sweep ASUS on an ASUS board, or Gigabyte on a Gigabyte board |
+| The current CPU manufacturer matches (`GenuineIntel`, `AuthenticAMD`) | every bucket **except `Display`** | A CPU proves the chipset stack is current; it proves nothing about a graphics package nothing binds. An AMD CPU must not shield a dead Radeon package, and an Intel F-SKU has no iGPU at all |
+| A present video controller matches the vendor | every bucket | A GPU in the slot means the whole stack is current, whatever its driver state |
+| The vendor has **any** driver package bound to a connected device | its vendor-owned bucket outright; each of `Display` / `Audio` / `Power` when one of the vendor's *live* packages routes there | That hardware is present, whatever the other checks say |
+
+On this machine that reads: AMD refused (CPU, iGPU, 16 live bindings), NVIDIA refused (RTX 5070,
+6 live), Gigabyte refused (chassis) — and Acer, ELAN, Qualcomm Atheros, Insyde and NXP eligible,
+which is exactly the laptop the image came from.
+
+Laptop OEM profiles (Acer, Dell, HP, Lenovo) carry one more gate: they are swept only with
+**evidence** that this image came from that OEM's machine — a not-present devnode of theirs in a
+platform class (System, Firmware, Battery, HID, Keyboard). Those vendors also make monitors and
+peripherals, and a Dell monitor that happens to be switched off is not residue.
 
 A refusal does not fail the run: the remaining buckets still process. Together these make the
 script safe to run on a machine it was not designed against, which a hardcoded package list would
@@ -1339,13 +1413,19 @@ Buckets are independent, so `-Scope Startup,Power` is a valid and useful run.
 
 | Scope | Removes |
 |---|---|
-| `Startup` | Vendor scheduled tasks, Run-key entries whose target is provably missing, orphaned `StartupApproved` flags |
+| `Startup` | Vendor scheduled tasks, Run-key entries whose target is provably missing, orphaned `StartupApproved` flags. Vendor-match entries come from **eligible** vendors only — a refused vendor's autostart is current software's autostart |
 | `Asus` | Programs, services, driver packages, the `AsIO3` legacy I/O driver, Appx HALs, folders, hives |
 | `IntelChipset` | Management Engine, DAL, LMS, RST, Serial IO, GNA, Bluetooth, Wi-Fi, PCH system packages |
-| `Display` | `iigd` / `igcc` / `cui` packages, Graphics Command Center data, shader cache, phantom display adapters |
-| `Audio` | Intel Smart Sound Technology (`cAVS`), Display Audio, SST for USB/Bluetooth, vendor audio APO extensions |
+| `Amd` | AMD chipset platform and AMD Software: PSP, GPIO, I2C, SMBus, Ryzen Master, the Adrenalin host, folders, hives |
+| `Nvidia` | Containers, telemetry, ShadowPlay, PhysX, the NVIDIA App, its root-level scheduled tasks, folders, shader caches, hives |
+| `Gigabyte` / `Msi` / `AsRock` | The board vendor's control-centre stack: Gigabyte Control Center / App Center / RGB Fusion, MSI Center / Dragon Center / Mystic Light, ASRock A-Tuning / Polychrome |
+| `LaptopOem` | Acer, Dell, HP, Lenovo (with ghost evidence), and the laptop-only component vendors: ELAN, Synaptics, Insyde, Qualcomm Atheros, Killer, Ricoh, NXP, Conexant, Alps — each restricted to the driver classes its hardware actually uses |
+| `Display` | Graphics packages of any vendor that no connected display adapter binds: Intel `iigd` / `igcc` / `cui`, AMD `u0NNNNNN`, NVIDIA `nv_disp`; Graphics Command Center data, shader caches, phantom display adapters |
+| `Audio` | Vendor audio packages nothing binds: Intel Smart Sound (`cAVS`), display audio (Intel, NVIDIA, AMD), SST for USB/Bluetooth, vendor audio APO extensions |
 | `Power` | Intel Dynamic Tuning and Innovation Platform Framework, phantom battery / AC adapter devnodes |
-| `All` | Every bucket above. The default |
+| `Platform` | The previous builds' **bus-enumerated** hardware that is no longer present: phantom PCI bridges and controllers, ACPI devices, the old CPU's processor nodes, disks, volumes, storage controllers, monitors. Never USB, HID, Bluetooth or software devices — "not present" there means unplugged. Acts only with `-RemoveGhostDevices`; reports the count otherwise |
+| `OtherVendors` | Discovery. Every driver-store provider **not** in the catalogue with zero live bindings is reported on every run; naming this scope removes their packages in platform driver classes (never Printer, Image, HID, USB, Bluetooth — nor Monitor or Net, which on a real census turned out to be a switched-off AOC monitor and an iPhone's USB-tethering NIC). **Not part of `All`** |
+| `All` | Every bucket above except `OtherVendors`. The default |
 
 ### Usage
 
@@ -1365,6 +1445,13 @@ Buckets are independent, so `-Scope Startup,Power` is a valid and useful run.
 # Everything, non-interactive, including the vendor config hives:
 .\Remove-LegacyHardwareResidue.ps1 -Force -RemoveResidualRegistry
 
+# The reused-drive run: every previous build's phantom PCI/ACPI devices, old CPU nodes, disks,
+# volumes and monitors. Vendor stacks untouched:
+.\Remove-LegacyHardwareResidue.ps1 -Scope Platform -RemoveGhostDevices
+
+# Which driver-store providers outside the catalogue have nothing bound to them:
+.\Remove-LegacyHardwareResidue.ps1 -Scope OtherVendors -ListOnly
+
 # Second pass after the reboot, to sweep the files the kernel was holding open:
 .\Remove-LegacyHardwareResidue.ps1 -Force
 
@@ -1381,8 +1468,16 @@ would you remove?" is the fastest way to make an operator skip the one step that
 * It will not pass `/force` to `pnputil /delete-driver`. If a package will not come out cleanly,
   something is still using it, and that is precisely what the gate exists to protect.
 * It will not remove "every hidden device". `-RemoveGhostDevices` is scoped to devices belonging to
-  the swept vendors — the blanket recipe also eats unplugged USB devices, Bluetooth pairings and
-  volume snapshots, which is how people lose working peripherals.
+  the swept vendors, and under `-Scope Platform` to devnodes whose instance ID is rooted at
+  `PCI`, `ACPI`, `SCSI`, `STORAGE`, `DISPLAY` or `IDE` — buses on which "not present" cannot mean
+  "unplugged". The blanket recipe also eats unplugged USB devices, Bluetooth pairings and HID
+  peripherals, which is how people lose working mice.
+* It will not uninstall vendor-published software that is not tied to the vendor's hardware. MSI
+  Afterburner on a Gigabyte board, GeForce NOW on a Radeon machine and Dell Display Manager on a
+  desktop are reported as `KEEP` and left alone.
+* It will not act on a provider it has no profile for unless you name `-Scope OtherVendors`, and
+  even then only on packages in platform driver classes. Discovery is reported on every run; the
+  decision is yours.
 * It will not delete a Run-key entry whose target it could not resolve. A command like
   `...\DesktopConnector.Applications.Tray.exe StartType:Auto` passes an unquoted argument with no
   leading dash to split on; a naive parser reads the whole string as a path, finds no file, and
@@ -1403,6 +1498,149 @@ Loaded kernel drivers hold their `.sys` files open until the machine restarts, s
 removes registrations and reports what is pending, then exits `3010`. Re-run after the reboot to
 finish the file sweep; the second pass is fast and usually reports only "already gone". Every step
 is idempotent and treats "already gone" as success.
+
+---
+
+## `Remove-WindowsBloat.ps1` — Windows' own bloat, with an undo
+
+Windows ships with a layer that exists for Microsoft's benefit rather than yours: diagnostic data
+collection, "suggested" apps that install themselves, ads in Settings and on the lock screen, Bing
+and Copilot wired into the search box, Recall, Widgets, and forty-odd Store apps nobody asked
+for. This script takes that layer off in the same shape as everything else here — census first,
+evidence-gated, logged, previewable — and adds the one thing the others do not need: **every
+registry value it changes is backed up first, and `-Restore` puts them all back.**
+
+The registry values were cross-referenced against the `Regfiles` shipped with
+[Raphire/Win11Debloat](https://github.com/Raphire/Win11Debloat) (MIT), the most widely used tool
+of this kind; its default selection is the basis of the **Recommended** set here. What differs is
+the shape: the catalogue is *data* — one row per tweak, each a list of registry operations plus
+an optional post-step — and the engine reads every value back before it writes, so the census
+can say `APPLIED`, `PENDING` (with the exact values that would change) or `N/A` (wrong build)
+for each one.
+
+### Census, backup, apply, restore
+
+```
+  * DisableTelemetry               APPLIED  Disable telemetry, diagnostic data, ... [POLICY]
+  * DisableCopilot                 APPLIED  Disable and remove Microsoft Copilot [POLICY]
+  * HideChat                       N/A      Hide the Chat / Meet Now icon - Windows 10 only (build <= 22621)
+    DisableFastStartup             PENDING  Disable Fast Startup (full shutdown every time)
+        HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power\HiberbootEnabled: DWord=1 -> DWord=0
+
+Selected: 13  to apply: 0  already applied: 11  not applicable: 2   (* = selected)
+```
+
+`*` marks the selection in force. A selected tweak that is already applied is skipped; one whose
+Windows build is out of range is skipped; an app that is not installed is skipped. The run says
+so in each case, and exits `2` when there is nothing left to do.
+
+Before the first write, every value about to be touched — whether it existed, its type, its data
+— is captured to a JSON file under `%ProgramData%\ADesk_Cleaner`, and the path is printed with
+the exact `-Restore` command. Restore sets every captured value back and **deletes the ones that
+did not exist before**, so a policy this script created is removed rather than zeroed. Apps are
+not restored; they come back from the Microsoft Store.
+
+### Policies
+
+A handful of tweaks have no per-user setting and can only be applied as a machine or user
+**policy** — keys under `...\Policies\...`. Those are the ones that make Windows and Edge show
+*"Some settings are managed by your organization"*. Every such tweak is tagged `[POLICY]` in the
+census, the run prints a reminder when any is about to be applied, and `-Restore` removes them.
+
+### The catalogue
+
+| Group | Recommended | Also available |
+|---|---|---|
+| Privacy | `DisableTelemetry` (also disables the eight CEIP / compatibility-appraiser scheduled tasks), `DisableSuggestions`, `DisableEdgeAds` | `DisableSettings365Ads`, `DisableLockscreenTips`, `DisableDesktopSpotlight`, `DisableLocationServices`, `DisableFindMyDevice` |
+| AI | `DisableCopilot` (removes the Copilot packages too), `DisableRecall`, `DisableClickToDo`, `DisableAISvcAutoStart` | `DisableEdgeAI`, `DisablePaintAI`, `DisableNotepadAI` |
+| Search | `DisableBing` (removes the Bing Search package too) | `DisableSearchHighlights`, `DisableSearchHistory` |
+| Taskbar | `DisableWidgets` (removes the three Widgets packages), `HideChat` (Windows 10) | `DisableStartRecommended`, `DisableStartPhoneLink`, `TaskbarAlignLeft`, `HideTaskview`, `HideSearchTb`, `ShowSearchIconTb`, `EnableEndTask` |
+| Explorer | `ShowKnownFileExt`, `Hide3dObjects` (Windows 10) | `ShowHiddenFolders`, `ExplorerToThisPC`, `HideHome`, `HideGallery`, `RevertContextMenu` |
+| System | `DisableDragTray` | `DisableMouseAcceleration`, `DisableStickyKeys`, `DisableFastStartup`, `DisableStorageSense`, `DisableModernStandbyNetworking`, `DisableSettingsHome`, `DisableNotifications` |
+| Gaming | — | `DisableDVR`, `DisableGameBarIntegration` |
+| Update | — | `DisableUpdateASAP`, `PreventUpdateAutoReboot`, `DisableDeliveryOptimization`, `DisableDeviceAutoAppDownload` |
+| Appearance | — | `EnableDarkMode`, `DisableTransparency`, `DisableAnimations` |
+
+Win11Debloat's *Store search suggestions* tweak is deliberately absent: it edits the Store's
+SQLite database rather than the registry, which this script's backup-and-restore model cannot
+cover honestly.
+
+### Apps
+
+The default list is the Recommended app selection — 84 packages: the discontinued Bing apps,
+Cortana, Dev Home, Feedback Hub, the games, Teams, the sponsored third-party apps (TikTok,
+Candy Crush, Disney+, Spotify and the rest) — matched by package family name against every user
+*and* the provisioned list, so a removed app does not come back for the next new account. The
+Store-distributed Copilot and (opt-in) OneDrive go through `winget`, which is where they are
+registered.
+
+Never removed, whatever list is passed: the **Microsoft Store** (no supported reinstall), the
+**Xbox identity / TCUI / speech-to-text** components (dependencies of games and of the Store
+itself), **Edge** (Windows Sandbox's only browser, and it comes back with the next cumulative
+update anyway), **Windows Terminal** (it may be the window you are in) and the app runtimes. The
+Xbox app and the Game Bar overlays are removed only with `-IncludeGamingApps`, because some PC
+games need them to launch.
+
+### Usage
+
+```powershell
+# The recommended first run. What would change, and what is already done. NO ELEVATION NEEDED:
+.\Remove-WindowsBloat.ps1 -ListOnly
+
+# The Recommended set, tweaks and apps, after a confirmation prompt:
+.\Remove-WindowsBloat.ps1
+
+# Exactly two tweaks, unattended:
+.\Remove-WindowsBloat.ps1 -Tweak DisableTelemetry,DisableBing -Force -Confirm:$false
+
+# Every privacy and AI tweak, plus the Gaming group, no app removal (needs -Command, see the note):
+powershell -Command ".\Remove-WindowsBloat.ps1 -Group Privacy,AI,Gaming -RemoveApps:`$false"
+
+# Recommended apps, but keep Clipchamp and To Do; also take the Xbox app and OneDrive:
+.\Remove-WindowsBloat.ps1 -KeepApps Clipchamp.Clipchamp,Microsoft.Todos -IncludeGamingApps -IncludeOneDrive
+
+# Put everything back:
+.\Remove-WindowsBloat.ps1 -Restore "C:\ProgramData\ADesk_Cleaner\WindowsBloat-backup_20260823_091500.json"
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-ListOnly` | switch | off | Census only. Needs no elevation. |
+| `-Tweak` | string[] | Recommended set | Apply exactly these tweak IDs. Accepts `A,B` as one string, so it works through `-File` and the `.cmd` launcher. |
+| `-SkipTweak` | string[] | — | IDs to leave out of whatever selection is in force. |
+| `-Group` | string[] | — | Add every tweak in these groups, Recommended or not. |
+| `-RemoveApps` | bool | `$true` | Remove the apps on the list. `:$false` needs the `-Command` form. |
+| `-Apps` | string[] | Recommended list | Remove exactly these package names. Protected names are refused even here. |
+| `-KeepApps` | string[] | — | Names to leave installed. |
+| `-IncludeGamingApps` | switch | off | Also remove the Xbox app and the two Game Bar overlays. |
+| `-IncludeOneDrive` | switch | off | Also uninstall the OneDrive client via winget. |
+| `-CreateRestorePoint` | switch | off | System Restore point first. Windows refuses a second one within 24 hours; that is reported, not failed. |
+| `-NoExplorerRestart` | switch | off | Do not restart Explorer at the end. |
+| `-Restore` | string | — | Backup JSON from an earlier run. Restores it and does nothing else. |
+| `-Force` | switch | off | Skip the confirmation prompt. Does **not** suppress `ShouldProcess`; add `-Confirm:$false` for unattended. |
+| `-LogPath` | string | `%TEMP%\...` | Transcript path. |
+| `-BackupPath` | string | `%ProgramData%\ADesk_Cleaner` | Directory for the backup JSON. |
+| `-TargetSid` | string | *(automatic)* | The user whose `HKCU` is changed; captured before elevation and relayed across it. |
+
+### Notes and limitations
+
+- **It changes this machine and the user who ran it.** `HKLM` values are machine-wide; `HKCU`
+  values go to the invoking user — by SID, so answering the UAC prompt with a *different*
+  administrator account still changes *your* settings, not the administrator's. There is no
+  other-user or Sysprep/default-profile mode; run it once per account that matters.
+- **Sign out afterwards.** Explorer is restarted for you (unless `-NoExplorerRestart`, or the
+  elevated account differs from yours), but the Settings app and the Start menu read several of
+  these values only at sign-in.
+- **`-Force` alone is not unattended.** `ConfirmImpact = 'High'` raises PowerShell's own prompt
+  independently of the script's; `-Force -Confirm:$false` is the unattended form.
+- `DisableTelemetry` also sets `AllowTelemetry = 0`. If you are a Windows Insider, builds may stop
+  arriving until optional diagnostic data is turned back on.
+- `-Restore` restores registry values only. Removed apps are reinstalled from the Store — all of
+  them can be, except the two the script refuses to remove in the first place.
+- An unelevated `-ListOnly` sees the current user's apps only; the real run enumerates every user
+  and the provisioned list, and says so.
 
 ---
 
@@ -1521,6 +1759,214 @@ Run `-ListOnly` first, for the same reason the uninstallers have it.
   the override is read rather than assumed. A location that resolves to a system directory is
   refused outright.
 - Exit `3` after a run usually means a file was still open — close Revit and re-run.
+
+---
+
+## `Reset-SearchIndex.ps1` — Windows Search, reset and un-throttled
+
+Also not an uninstaller. It wipes the Windows Search index and forces a full rebuild — and, more
+to the point, lifts the self-throttling that otherwise makes that rebuild take days instead of
+hours. It replaces the widely circulated `Reset_and_Rebuild_Search_Index.bat`, fixing three
+defects in it and adding the settings that actually govern rebuild speed.
+
+`-Status` and `-Analyze` run before the elevation check: they need no admin rights and change
+nothing. Everything else self-elevates.
+
+### Deleting the index is the easy half
+
+Wiping the database is trivial, and on its own it is why people conclude that "rebuilding the
+index takes a week". Two settings a plain reset never touches govern how long it actually takes:
+
+| Setting | Effect |
+|---|---|
+| `Gathering Manager\DisableBackOff = 0` | The indexer **suspends itself** whenever it sees user activity — keyboard, mouse, CPU load, disk load, battery. On a machine in daily use it makes very little forward progress, which is precisely the machine you are trying to fix. |
+| `EnableFindMyFiles = 1` ("Enhanced") | Indexes **entire drives** rather than just the user libraries. On a dev machine, `node_modules`, `.git` and package caches push the item count into the millions. |
+
+The first is what turbo addresses — applied by default on a reset, suppressed with `-NoTurbo`,
+available on its own as `-TurboOnly`. The second is what `-Analyze` diagnoses and `-Mode Classic`
+fixes.
+
+Turbo is three registry values plus a best-effort priority bump:
+
+| Value | Set to | Why |
+|---|---|---|
+| `Gathering Manager\DisableBackOff` | `1` | Stop backing off on user activity. The single biggest factor in wall-clock rebuild time. |
+| `Gathering Manager\RespectPowerModes` | `0` | Do not drop to idle priority under power-saver or modern standby. |
+| `Policies\...\Windows Search\PreventIndexOnBattery` | `0` | Keep indexing on battery. Ordinary policy key — Administrators can write this one normally. |
+| *(process)* `SearchIndexer` priority | `Normal` | Windows runs it in background mode, which forces the lowest I/O priority. Usually declined because the process runs as SYSTEM, in which case the script says so and carries on. Resets on restart either way. |
+
+**Turbo is a loan, not a gift.** For as long as it is on, the indexer competes with you for CPU
+and disk. The script reverts it automatically when the monitor sees the rebuild drain; with
+`-NoMonitor` that never happens and you have to run `-RevertTurbo` yourself — which is why the
+run ends by telling you so.
+
+### The key Administrators cannot write
+
+On Windows 11 23H2 and later, `HKLM\SOFTWARE\Microsoft\Windows Search\Gathering Manager` sets
+`AreAccessRulesProtected` and grants Administrators `ReadKey` only. Full control belongs to
+`NT SERVICE\WSearch` and `TrustedInstaller`, so **running as SYSTEM is not a workaround** and
+`DisableBackOff` simply cannot be set the usual way.
+
+`-TakeOwnership` is the opt-in that gets past that, and it is opt-in precisely because it touches
+an ACL:
+
+1. Enable `SeTakeOwnershipPrivilege` in the process token — PowerShell does not enable it by
+   default. `AdjustTokenPrivileges` reports success even when it assigned nothing, so the script
+   checks `ERROR_NOT_ALL_ASSIGNED` rather than trusting the return value.
+2. Take ownership as `BUILTIN\Administrators`.
+3. As owner, grant Administrators full control.
+4. Write the value.
+5. **Restore the original ACL and owner** — in a `finally`, so it happens whether or not the
+   write succeeded. The net change is the one value; the key is not left weakened.
+
+If step 5 ever fails, the script says so in red and names the key it left with
+`Administrators:FullControl`, rather than reporting a clean run.
+
+Without `-TakeOwnership`, a denied write is reported and skipped — the reset still proceeds, just
+at throttled speed. `-Status` tells you up front which case you are in, so you find out before
+the reset rather than during it:
+
+```
+Turbo writable : NO - key is owner-locked to WSearch/TrustedInstaller
+                 (needs -TakeOwnership; not even SYSTEM can write it)
+```
+
+### Three defects in the `.bat` it replaces
+
+| Defect | Fix |
+|---|---|
+| **Unbounded restart loop** — retries the service start forever with no delay, spinning the CPU indefinitely when the start can never succeed | Bounded retry with exponential backoff capped at 30 s, `-StartRetries` (default `6`), then a clear failure and a pointer to `-Repair` |
+| **Misses the SQLite sidecars** — deletes `Windows.edb` and leaves the modern index in place | Deletes `Windows.db` / `Windows-gather.db` **and** their `-wal` / `-shm` sidecars, alongside the legacy ESE set (`Windows.edb`, `*.jrs`, `*.chk`, `edb*.log`, `MSS*.log`) |
+| **Deletes as soon as the service reports `Stopped`** — the delete then silently fails | The service reports `Stopped` before `SearchIndexer.exe` releases its handles. The script waits for `SearchIndexer`, `SearchProtocolHost`, `SearchFilterHost` and `SearchApp` to exit — up to `-StopTimeoutSec` (default `90`) — then force-terminates what is left |
+
+Individual files get three delete attempts, with `takeown` and an `icacls` grant to
+Administrators on the second.
+
+### Bringing the service back is an obligation, not a step
+
+Once the service is stopped and the database deleted, the machine is in a state it must not be
+left in. So everything destructive runs inside a `try`, and the restart runs in the `finally` —
+on every path, including an unexpected throw:
+
+```powershell
+try {
+    Stop-SearchService -TimeoutSec $StopTimeoutSec
+    Remove-IndexDatabase
+    Set-RebuildFlag
+    Set-IndexMode -Requested $Mode
+    if (-not $NoTurbo) { Enable-Turbo | Out-Null }
+}
+finally {
+    $serviceStarted = Start-SearchService -Retries $StartRetries
+}
+```
+
+This is not theoretical. An earlier version applied the tuning writes between the delete and the
+restart with no such guard; a denied registry write threw, and stranded the machine with no index
+**and** a disabled service. For the same reason `Enable-Turbo` is non-throwing by contract — a
+tuning failure warns and continues, because it must never abort a reset already in progress.
+
+If the restart genuinely fails, the run exits `1` after stating plainly that the index is gone
+and the service is not running, and points at `-Repair`.
+
+### Finding what is inflating the index
+
+`-Analyze` walks `-AnalyzePath` (default your profile) and reports the total file count, the
+fifteen heaviest top-level folders, and the known bloat patterns — `node_modules`, `.git`,
+`.venv`, `venv`, `__pycache__`, `target`, `bin`, `obj`, `.gradle`, `.next`, `dist`. It changes
+nothing and needs no elevation.
+
+The catch it prints alongside the results: **Windows Search has no wildcard exclusions.** There
+is no way to exclude `**/node_modules`. You exclude the parent folder in Indexing Options
+(`control.exe srchadmin.dll`), or you drop to `-Mode Classic` and index the user libraries only.
+
+### Watching a rebuild
+
+`-Monitor` attaches to a rebuild already in progress — elevation required, because the index
+directory is not readable without it. It samples the database size every 30 seconds and calls the
+rebuild complete after ten consecutive samples with no growth (five minutes), provided the index
+is over 50 MB — which is what stops it declaring victory on a rebuild that never started. A full
+reset runs the monitor automatically unless `-NoMonitor`, and reverts turbo when it drains.
+
+It is a heuristic, not a progress bar. The authoritative item count is in Indexing Options.
+
+### Usage
+
+```powershell
+# What is configured now, and whether turbo is even writable on this build. No elevation, changes nothing:
+powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -Status
+
+# Which folders are inflating the item count. No elevation, changes nothing:
+powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -Analyze
+
+# The index is fine, it is just crawling — un-throttle it without discarding it:
+powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -TurboOnly
+
+# Full reset, with turbo and a live progress monitor:
+powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1
+
+# Full reset on a dev machine: user libraries only, and write the owner-locked key:
+powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -Mode Classic -TakeOwnership
+
+# Watch a rebuild that is already running, without resetting anything:
+powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -Monitor
+
+# Put polite throttling back once the rebuild has finished:
+powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -RevertTurbo
+
+# Recover from an interrupted reset that left the service stopped or disabled:
+powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -Repair
+
+# Genuinely unattended needs BOTH switches — see the note below:
+powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -Force -Confirm:$false -NoMonitor
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-Status` | switch | off | Report configuration and index state, then exit. Changes nothing, needs no elevation. |
+| `-Analyze` | switch | off | Report the folders inflating the item count under `-AnalyzePath`, then exit. Changes nothing, needs no elevation. |
+| `-AnalyzePath` | string | `%USERPROFILE%` | Root for `-Analyze`. |
+| `-Repair` | switch | off | Re-enable and start `wsearch` without touching the index. The recovery path after an interrupted reset. |
+| `-Monitor` | switch | off | Watch a rebuild that is already running, and exit when it drains. Requires elevation; resets nothing. |
+| `-TurboOnly` | switch | off | Apply the un-throttle settings and restart the service, keeping the existing index. |
+| `-RevertTurbo` | switch | off | Restore polite throttling. Run this once the rebuild has completed. |
+| `-NoTurbo` | switch | off | Reset without applying the un-throttle settings. |
+| `-NoMonitor` | switch | off | Skip the post-reset monitor. **Turbo is normally reverted by the monitor**, so with this switch you must run `-RevertTurbo` yourself. |
+| `-TakeOwnership` | switch | off | Permit writing owner-locked keys, restoring the original ACL and owner afterwards. Without it, a denied turbo write is reported and skipped. |
+| `-Mode` | `Classic` / `Enhanced` / `Keep` | `Keep` | `Classic` indexes user libraries only — far fewer items. `Enhanced` indexes whole drives. `Keep` leaves the current setting alone. |
+| `-StopTimeoutSec` | int | `90` | How long to wait for the service to stop, and for the index processes to release their file handles, before force-terminating them. |
+| `-StartRetries` | int | `6` | Attempts to start the service, with exponential backoff capped at 30 s. |
+| `-Force` | switch | off | Skip the script's own `Continue? [y/N]` prompt. **Does not** suppress the `ShouldProcess` confirmation — see below. |
+
+`-Monitor`, `-AnalyzePath`, `-StopTimeoutSec` and `-StartRetries` are absent from the script's
+own `Get-Help` output; the table above is the complete list.
+
+### Notes and limitations
+
+- **`-Force` alone is not unattended.** The script declares `ConfirmImpact = 'High'`, so
+  `ShouldProcess` raises its own confirmation whenever `$ConfirmPreference` is `High` — the
+  default. `-Force` only skips the script's `Read-Host`. A genuinely non-interactive run needs
+  `-Force -Confirm:$false`.
+- **`-WhatIf` is a weak preview here.** The `ShouldProcess` gate wraps the whole destructive
+  block, so `-WhatIf` tells you only that the index would be reset. `-Status` is the real
+  preview — and the script prints it before the confirmation anyway.
+- **This script does not log.** Every other script here writes a transcript; this one writes to
+  the console only. Run it in a window you can read, or wrap it in `Start-Transcript` yourself.
+- **The service is restored as `delayed-auto`, unconditionally.** The original start type is not
+  captured and put back. That is the Microsoft default for `wsearch`, but if you had deliberately
+  set it to `Automatic` or `Manual`, set it again afterwards.
+- **Search is degraded until the rebuild finishes** — hours on a large scope. Explorer, the Start
+  menu and Outlook all fall back to slower live scans in the meantime, and there is no
+  partial-index mode to soften it.
+- Deleting the index is not reversible and there is no backup — but nothing of yours is in it.
+  The index is derived data, rebuilt from the files themselves.
+- The monitor's completion check is a heuristic. A rebuild stalled on an unreachable network
+  location looks identical to a finished one; confirm the item count in Indexing Options.
+- `-TakeOwnership` widens an ACL for the duration of one registry write and restores it in a
+  `finally`. If that restore fails, the key is left with `Administrators:FullControl` — the
+  script reports it loudly, and it is worth fixing rather than ignoring.
 
 ---
 

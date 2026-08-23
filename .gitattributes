@@ -1,11 +1,19 @@
 # =============================================================================
 # ADesk_Cleaner - line-ending and diff policy
 #
-# This repository is Windows-only tooling (Windows PowerShell 5.1 + Autodesk
-# Revit), so the working tree uses CRLF while Git stores normalized LF in the
-# repository. Declaring `eol=crlf` explicitly means that holds for every
-# contributor regardless of their own `core.autocrlf` setting - relying on
-# `text=auto` alone leaves the checkout style up to each machine's config.
+# This repository is Windows-only tooling - Windows PowerShell 5.1 scripts that
+# drive vendor uninstallers (Autodesk, Adobe, Fortinet), the driver store, and
+# Windows services such as Windows Search. The working tree therefore uses CRLF
+# while Git stores normalized LF in the repository. Declaring `eol=crlf`
+# explicitly means that holds for every contributor regardless of their own
+# `core.autocrlf` setting - relying on `text=auto` alone leaves the checkout
+# style up to each machine's config.
+#
+# Rules here are matched by path pattern, not by content, so a newly added
+# script needs no entry of its own: `*.ps1` already gives it `text eol=crlf`
+# and `linguist-language=PowerShell`. Confirm with:
+#
+#     git check-attr -a <file>
 # =============================================================================
 
 # Default: let Git detect text files, store LF in the repo, check out CRLF.

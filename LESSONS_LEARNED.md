@@ -142,6 +142,19 @@ passed, or an "unattended" run blocks forever.
 
 ---
 
+### B4. `-File` hands `-Scope A,B` over as ONE string
+
+From a PowerShell prompt, `-Scope Startup,Power` is an array. Through
+`powershell.exe -File` — and therefore through every `.cmd` launcher — it is the
+single string `"Startup,Power"`, and a `[ValidateSet]` on the `[string[]]`
+parameter rejects it before the script runs a line. Measured on
+`Remove-LegacyHardwareResidue.ps1`: the README's own `-Scope Asus,Display`
+example failed from the launcher with *"does not belong to the set"*.
+
+**Invariant:** no `[ValidateSet]` on a list parameter a launcher can pass.
+Split on commas after binding, trim, validate by hand with the same message,
+and canonicalise the casing so later `-contains` checks are exact.
+
 ## C. Windows Installer failures
 
 Full remediation steps live in [TROUBLESHOOTING.md](TROUBLESHOOTING.md); this is
@@ -263,6 +276,24 @@ delete the **target's** contents — user data far outside the product tree.
 
 ---
 
+### E6. A vendor pattern is not a removal list
+
+`Remove-LegacyHardwareResidue.ps1` originally built the `-Scope Startup`
+Run-key sweep from **every** vendor profile's pattern, eligible or not. With
+two profiles that was merely wrong in principle; with AMD, NVIDIA and Gigabyte
+in the catalogue it would have deleted this machine's live GPU and board
+autostart entries on a Startup run. Found by reading, not by running — which
+is the cheap way to find it.
+
+**Invariant:** anything that turns a *name match* into a *removal* reads from
+the eligible set, never from the catalogue. Dead-target entries stay
+vendor-independent, because "the file is gone" is evidence on its own.
+
+Related, from the same change: `'x' -match $null` is `$true`. A profile field
+that can be `$null` (Appx pattern, program pattern, root-task pattern) is
+guarded at every use site, or the vendor with no Appx pattern is handed every
+Appx package on the machine.
+
 ## F. Windows PowerShell 5.1 traps
 
 - **StrictMode: guard the absent OBJECT as well as the absent property.**
@@ -335,6 +366,10 @@ line is a bug that already happened once.
 | 14 | NWC exporters excluded unless `-IncludeExporters` | Navisworks |
 | 15 | `$null -eq $Obj` checked before `.PSObject` | all reading the registry |
 | 16 | Drive roots refused | all that delete |
+| 17 | Vendor-match removals (Run keys, tasks) drawn from **eligible** vendors only; a refused vendor never feeds a removal list | Remove-LegacyHardwareResidue |
+| 18 | List parameters accept one `"a,b"` string and split it **after** binding — no `[ValidateSet]` on a `[string[]]` that `-File` or a `.cmd` launcher can pass | Remove-LegacyHardwareResidue, Remove-WindowsBloat |
+| 19 | A `-match` against a pattern that can be `$null` is guarded at the use site — `-match $null` matches everything | Remove-LegacyHardwareResidue (Appx/Program/TaskName patterns) |
+| 20 | Function results that may be empty are wrapped in `@()` at the call site before `.Count` under `Set-StrictMode` | Remove-WindowsBloat |
 
 ### Known outstanding drift
 

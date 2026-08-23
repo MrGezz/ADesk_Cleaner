@@ -14,10 +14,18 @@
     them. Meanwhile vendor scheduled tasks keep firing at logon against hardware
     that no longer exists.
 
-    This script removes that residue for the two vendors that leave the most of
-    it - ASUS (Armoury Crate / ROG / ASUS System Control Interface) and Intel
+    This script removes that residue for a CATALOGUE of platform vendors - the
+    ones a reused system drive accumulates across desktop builds and laptop
+    images: ASUS (Armoury Crate / ROG / ASUS System Control Interface), Intel
     (chipset, Management Engine, RST, graphics, Smart Sound audio, Dynamic
-    Tuning) - plus the generic startup residue any migration leaves behind.
+    Tuning), AMD (chipset and Radeon), NVIDIA, Gigabyte, MSI, ASRock, the
+    laptop OEMs (Acer, Dell, HP, Lenovo) and the component vendors that only
+    ever ship inside a laptop (ELAN, Synaptics, Insyde, Qualcomm Atheros,
+    Killer, Ricoh, NXP, Conexant, Alps) - plus the generic startup residue any
+    migration leaves behind, the phantom devnodes of every previous build's
+    bus-enumerated hardware (-Scope Platform), and a discovery pass that
+    reports any OTHER driver-store provider with zero live bindings, so the
+    next build's vendor is caught without a code change (-Scope OtherVendors).
 
     THE CENTRAL FACT, and the reason this is not a name-matching delete loop:
 
@@ -92,16 +100,28 @@
        UI and apply on-battery power policy branches. Those phantoms are
        removed under -Scope Power.
 
-    THREE HARD REFUSALS, checked before anything is removed:
+    FOUR HARD REFUSALS, checked before anything is removed, and applied PER
+    BUCKET rather than per vendor:
 
-      * If the CURRENT baseboard manufacturer matches a vendor being swept, the
-        entire vendor bucket is refused. You do not sweep ASUS on an ASUS
-        board.
-      * If the CURRENT CPU manufacturer is GenuineIntel, the Intel buckets
-        (IntelChipset / Display / Audio / Power) are refused.
-      * If a vendor has ANY driver package bound to a connected device, that
-        vendor is LIVE on this machine and its whole bucket is refused,
-        regardless of the other two checks.
+      * If the CURRENT baseboard/system manufacturer matches a vendor, every
+        bucket of that vendor is refused. You do not sweep ASUS on an ASUS
+        board, or Gigabyte on a Gigabyte board.
+      * If the CURRENT CPU manufacturer matches a vendor (GenuineIntel,
+        AuthenticAMD), every bucket of that vendor is refused EXCEPT Display.
+        A CPU proves the chipset stack is current; it proves nothing about a
+        graphics package the machine no longer binds - an AMD CPU must not
+        shield a dead Radeon package, and an Intel F-SKU has no iGPU at all.
+      * If a CURRENT video controller matches a vendor, every bucket of that
+        vendor is refused. A present GPU means the whole stack is current.
+      * If a vendor has ANY driver package bound to a connected device, its
+        vendor-owned bucket (programs, services, folders, hives) is refused
+        outright, and each cross-vendor bucket (Display / Audio / Power) is
+        refused when one of that vendor's LIVE packages routes to it.
+
+    Laptop OEM profiles (Acer, Dell, HP, Lenovo) additionally require EVIDENCE
+    that this image came from that OEM's machine - a not-present devnode of
+    theirs in a platform class - because those vendors also make monitors and
+    peripherals, and a monitor that happens to be switched off is not residue.
 
     Each refusal is reported with its evidence and does not fail the run - the
     remaining buckets still process. Together they make this script safe to run
@@ -123,13 +143,37 @@
                    the AsIO3 legacy I/O driver, Appx HALs, folders, hives.
       IntelChipset Intel chipset platform: Management Engine, DAL, LMS, RST,
                    Serial IO, GNA, Bluetooth, Wi-Fi, PCH system packages.
-      Display      Intel integrated graphics: iigd/igcc/cui packages, Graphics
-                   Command Center data, shader cache, ghost display adapters.
-      Audio        Intel Smart Sound Technology (cAVS), Display Audio, SST for
-                   USB/Bluetooth, and vendor audio APO extensions.
+      Amd          AMD chipset platform and AMD Software: PSP, GPIO, I2C,
+                   SMBus, Ryzen Master, the Adrenalin host, folders, hives.
+      Nvidia       NVIDIA: containers, telemetry, ShadowPlay, PhysX, the
+                   NVIDIA App, folders, shader caches, hives.
+      Gigabyte     Gigabyte Control Center / App Center / RGB Fusion stack.
+      Msi          MSI Center / Dragon Center / Mystic Light stack.
+      AsRock       ASRock A-Tuning / Polychrome stack.
+      LaptopOem    Laptop OEM and laptop-only component stacks: Acer, Dell,
+                   HP, Lenovo, and ELAN, Synaptics, Insyde, Qualcomm Atheros,
+                   Killer, Ricoh, NXP, Conexant, Alps.
+      Display      Graphics packages of any vendor that no connected display
+                   adapter binds: Intel iigd/igcc/cui, AMD u0NNNNNN, NVIDIA
+                   nv_disp, Graphics Command Center data, shader caches, ghost
+                   display adapters.
+      Audio        Vendor audio packages nothing binds: Intel Smart Sound
+                   (cAVS), display audio (Intel, NVIDIA, AMD), SST for
+                   USB/Bluetooth, vendor audio APO extensions.
       Power        Intel Dynamic Tuning + Innovation Platform Framework, and
                    phantom battery / AC adapter devnodes.
-      All          Every bucket above. This is the default.
+      Platform     The previous builds' BUS-ENUMERATED hardware that is no
+                   longer present: phantom PCI bridges and controllers, ACPI
+                   devices, the old CPU's processor nodes, disks, volumes,
+                   storage controllers and monitors. Never USB, HID,
+                   Bluetooth or software devices, which are merely unplugged.
+                   Acts only with -RemoveGhostDevices; reports otherwise.
+      OtherVendors Discovery. Driver packages from any provider NOT in the
+                   catalogue that has ZERO live bindings, restricted to
+                   platform driver classes, plus their phantom devnodes. The
+                   census always reports these; they are only removed when
+                   this bucket is named explicitly. NOT part of All.
+      All          Every bucket above except OtherVendors. This is the default.
 
     Buckets are independent: -Scope Startup,Power is a valid, useful run.
 
@@ -180,11 +224,13 @@
     gone - but they are also the only record of what was configured.
 
 .PARAMETER RemoveGhostDevices
-    Remove "not present" phantom devnodes belonging to the swept vendors, and
-    (under -Scope Power) phantom battery/AC-adapter nodes. Opt-in. Scoped
-    strictly to devices whose driver package is being removed or whose hardware
-    ID belongs to a swept vendor - this is NOT the "remove every hidden device"
-    recipe, which also eats unplugged USB devices and Bluetooth pairings.
+    Remove "not present" phantom devnodes belonging to the swept vendors,
+    (under -Scope Power) phantom battery/AC-adapter nodes, and (under -Scope
+    Platform) the previous builds' bus-enumerated hardware: devnodes whose
+    instance ID is rooted at PCI, ACPI, SCSI, STORAGE, DISPLAY or IDE. Opt-in.
+    This is NOT the "remove every hidden device" recipe: a USB, HID, Bluetooth
+    or software devnode is never touched, because "not present" for those
+    means "unplugged", not "gone".
 
 .PARAMETER Force
     Fully non-interactive: accept every prompt, and pass silent flags to vendor
@@ -221,6 +267,19 @@
 
     Everything, non-interactive, including the vendor config hives.
 
+.EXAMPLE
+    .\Remove-LegacyHardwareResidue.ps1 -Scope Platform -RemoveGhostDevices
+
+    The reused-drive run: remove every previous build's phantom PCI/ACPI
+    devices, old CPU nodes, disks, volumes and monitors. Vendor stacks are
+    untouched.
+
+.EXAMPLE
+    .\Remove-LegacyHardwareResidue.ps1 -Scope OtherVendors -ListOnly
+
+    See which driver-store providers outside the catalogue have nothing bound
+    to them - the next build's residue, before it has a profile.
+
 .NOTES
     Exit codes (shared with the other uninstallers in this repository):
 
@@ -236,7 +295,10 @@
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
-    [ValidateSet('Startup', 'Asus', 'IntelChipset', 'Display', 'Audio', 'Power', 'All')]
+    # No [ValidateSet]: "powershell.exe -File ... -Scope Startup,Power" binds the
+    # comma list as ONE string, which ValidateSet rejects before the script can
+    # split it. Validated by hand below, after splitting, so the .cmd launcher
+    # and -File both accept the same syntax the README shows.
     [string[]]$Scope = @('All'),
 
     [switch]$ListOnly,
@@ -279,8 +341,27 @@ else {
     }
 }
 
+# Accept "-Scope A,B" however it arrived: as an array from a PowerShell prompt,
+# or as the single string "A,B" that powershell.exe -File hands over. Then
+# validate by hand, with the same message ValidateSet would have produced.
+$ValidScopes = @('Startup', 'Asus', 'IntelChipset', 'Amd', 'Nvidia', 'Gigabyte', 'Msi', 'AsRock',
+                 'LaptopOem', 'Display', 'Audio', 'Power', 'Platform', 'OtherVendors', 'All')
+$Scope = @($Scope | ForEach-Object { [string]$_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($Scope.Count -eq 0) { $Scope = @('All') }
+foreach ($s in $Scope) {
+    if ($ValidScopes -notcontains $s) {
+        Write-Host ("Invalid -Scope '{0}'. Valid values: {1}" -f $s, ($ValidScopes -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+}
+# Canonical casing, so later "-contains" checks are exact.
+$Scope = @($Scope | ForEach-Object { $v = $_; $ValidScopes | Where-Object { $_ -ieq $v } | Select-Object -First 1 })
+
+# OtherVendors is deliberately NOT in All: it acts on providers this script has
+# no profile for, and that is a decision the operator makes by naming it.
 if ($Scope -contains 'All') {
-    $Scope = @('Startup', 'Asus', 'IntelChipset', 'Display', 'Audio', 'Power')
+    $Scope = @('Startup', 'Asus', 'IntelChipset', 'Amd', 'Nvidia', 'Gigabyte', 'Msi', 'AsRock',
+               'LaptopOem', 'Display', 'Audio', 'Power', 'Platform')
 }
 
 # --- Configuration --------------------------------------------------------
@@ -290,14 +371,45 @@ if ($Scope -contains 'All') {
 # vendor's own spelling and is NOT consistent: ASUS ships packages under
 # "ASUSTeK Computer Inc.", "ASUSTek COMPUTER INC." and "ASUSTek Computer Inc."
 # simultaneously. Matched case-insensitively on the stem only.
+#
+# Every profile carries the same fields, so the planner never special-cases a
+# vendor by name:
+#
+#   Kind            Platform   a motherboard / CPU / GPU vendor
+#                   Oem        a laptop OEM that ALSO makes monitors and
+#                              peripherals - swept only with ghost evidence
+#                   Component  a part that only ever ships inside a laptop
+#   Buckets         the -Scope names this vendor's residue files under. The
+#                   FIRST is the vendor-owned bucket: programs, services,
+#                   folders and hives are only touched when it is in scope.
+#                   Routing hints may move a PACKAGE to any other bucket in
+#                   the list; a bucket not in the list falls back to the first.
+#   ChassisPattern  current board/system manufacturer strings that mean "this
+#                   IS the current machine's vendor" and refuse every bucket.
+#   CpuPattern      a current CPU manufacturer that refuses every bucket
+#                   except Display (see the header on why).
+#   GpuPattern      a current video controller that refuses every bucket.
+#   Classes         optional allow-list of driver classes this vendor's
+#                   packages may be swept from. $null means any class the
+#                   global gates allow. Used where a vendor's name also
+#                   appears on printers, monitors or USB peripherals.
+#   TaskNamePattern vendor tasks registered at the ROOT of the task library
+#                   rather than in a vendor folder (NVIDIA and AMD do this).
+#
+# Every pattern that can be $null is guarded at its use site: PowerShell's
+# "-match $null" matches EVERYTHING, which would hand every Appx package on
+# the machine to a vendor with no Appx pattern.
 $VendorProfiles = @(
+    # --- Platform vendors --------------------------------------------------
     [pscustomobject]@{
         Vendor          = 'Asus'
+        Kind            = 'Platform'
+        Buckets         = @('Asus', 'Display', 'Audio', 'Power')
         ProviderPattern = '^asus'
-        # Baseboard/system manufacturer strings that mean "this IS the current
-        # machine's vendor" and must refuse the sweep.
         ChassisPattern  = 'asus'
         CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = $null
         ServiceNames    = @(
             'ArmouryCrateControlInterface', 'ArmouryCrateDownloadTool', 'asus', 'asusm',
             'AsusAppService', 'AsusCertService', 'AsusNumPadService', 'ASUSOptimization',
@@ -306,6 +418,7 @@ $VendorProfiles = @(
             'ATKWMIACPIIO', 'ROGKB', 'ROGMS'
         )
         TaskPaths       = @('\ASUS\')
+        TaskNamePattern = $null
         Roots           = @(
             'C:\Program Files\ASUS',
             'C:\Program Files (x86)\ASUS',
@@ -325,6 +438,8 @@ $VendorProfiles = @(
     },
     [pscustomobject]@{
         Vendor          = 'Intel'
+        Kind            = 'Platform'
+        Buckets         = @('IntelChipset', 'Display', 'Audio', 'Power')
         # \b is load-bearing. A bare '^intel' also matches "IntelliTrace
         # Profiler Proxy", "WinRT Intellisense Desktop" and every other
         # Microsoft Intellisense package registered in the uninstall hives -
@@ -336,6 +451,9 @@ $VendorProfiles = @(
         ChassisPattern  = $null
         # An Intel CPU means the Intel platform stack is current hardware.
         CpuPattern      = 'GenuineIntel'
+        # An Intel iGPU or Arc card means the graphics stack is too.
+        GpuPattern      = '^intel\b'
+        Classes         = $null
         ServiceNames    = @(
             'cphs', 'cplspcon', 'dptftcs', 'HfcDisableService', 'iaStorAfsService',
             'igccservice', 'igfxCUIService2.0.0.0', 'Intel(R) Platform License Manager Service',
@@ -343,6 +461,7 @@ $VendorProfiles = @(
             'LMS', 'PIEServiceNew', 'RstMwService', 'WMIRegistrationService'
         )
         TaskPaths       = @('\Intel\')
+        TaskNamePattern = $null
         Roots           = @(
             'C:\Program Files\Intel',
             'C:\Program Files (x86)\Intel',
@@ -358,6 +477,469 @@ $VendorProfiles = @(
         )
         ProgramPattern  = '^intel\b'
         AppxPattern     = '^intel\b'
+    },
+    [pscustomobject]@{
+        Vendor          = 'Amd'
+        Kind            = 'Platform'
+        Buckets         = @('Amd', 'Display', 'Audio', 'Power')
+        # "AMD", "Advanced Micro Devices, Inc." and "Advanced Micro Devices Inc"
+        # all occur in one store. \b keeps "Amdocs"-style names out.
+        ProviderPattern = '^(amd\b|advanced micro devices)'
+        ChassisPattern  = $null
+        CpuPattern      = 'AuthenticAMD'
+        GpuPattern      = '^(amd\b|advanced micro devices|ati\b|radeon)'
+        Classes         = $null
+        # NOT listed, because they are INBOX Windows components on every
+        # image: AmdK8, AmdPPM, amdxe, amdsata, amdxata, amdsbs, amdi2c. They
+        # sit in $InboxVendorNamedServices, which vetoes them by name.
+        ServiceNames    = @(
+            'amdfendr', 'amdfendrmgr', 'amdlog', 'AMD Crash Defender Service',
+            'AMD External Events Utility', 'AMDRyzenMasterDriverV', 'AMDRyzenMasterDriverV31',
+            'amdkmdag', 'amdwddmg', 'AmdPpkg', 'amd3dvcache', 'AmdAppCompat', 'amdgpio2',
+            'amdgpio3', 'amdpsp', 'AMDSMBus'
+        )
+        TaskPaths       = @('\AMD\')
+        TaskNamePattern = '^(AMD|StartCN$|StartDVR$|ModifyLinkUpdate$|RyzenMaster)'
+        Roots           = @(
+            'C:\Program Files\AMD',
+            'C:\Program Files (x86)\AMD',
+            'C:\ProgramData\AMD',
+            'C:\AMD',
+            'C:\Program Files\ATI Technologies',
+            'C:\Program Files (x86)\ATI Technologies'
+        )
+        UserRoots       = @('AMD', 'ATI')
+        RegistryKeys    = @(
+            'HKLM:\SOFTWARE\AMD', 'HKLM:\SOFTWARE\WOW6432Node\AMD', 'HKCU:\SOFTWARE\AMD',
+            'HKLM:\SOFTWARE\ATI Technologies', 'HKLM:\SOFTWARE\WOW6432Node\ATI Technologies', 'HKCU:\SOFTWARE\ATI'
+        )
+        ProgramPattern  = '^(amd\b|advanced micro|radeon|ryzen master)'
+        AppxPattern     = '^(AdvancedMicroDevicesInc|AMD)'
+    },
+    [pscustomobject]@{
+        Vendor          = 'Nvidia'
+        Kind            = 'Platform'
+        Buckets         = @('Nvidia', 'Display', 'Audio')
+        ProviderPattern = '^nvidia'
+        ChassisPattern  = $null
+        CpuPattern      = $null
+        GpuPattern      = 'nvidia'
+        Classes         = $null
+        ServiceNames    = @(
+            'NVDisplay.ContainerLocalSystem', 'NvContainerLocalSystem', 'NvContainerNetworkService',
+            'NvTelemetryContainer', 'NvBroadcastContainer', 'FrameViewSDK', 'nvlddmkm', 'NVHDA',
+            'nvvad_WaveExtensible', 'nvvhci', 'nvpcf'
+        )
+        TaskPaths       = @('\NVIDIA\')
+        # NvTmRep_CrashReport4_*, NvDriverUpdateCheckDaily_*, NvProfileUpdaterDaily_*,
+        # NvNodeLauncher_*, NvTmMon_*, "NVIDIA GeForce Experience SelfUpdate_*".
+        TaskNamePattern = '^(Nv|NVIDIA)'
+        Roots           = @(
+            'C:\Program Files\NVIDIA Corporation',
+            'C:\Program Files (x86)\NVIDIA Corporation',
+            'C:\ProgramData\NVIDIA',
+            'C:\ProgramData\NVIDIA Corporation',
+            'C:\NVIDIA'
+        )
+        UserRoots       = @('NVIDIA', 'NVIDIA Corporation')
+        RegistryKeys    = @(
+            'HKLM:\SOFTWARE\NVIDIA Corporation', 'HKLM:\SOFTWARE\WOW6432Node\NVIDIA Corporation',
+            'HKCU:\SOFTWARE\NVIDIA Corporation'
+        )
+        ProgramPattern  = '^nvidia'
+        AppxPattern     = '^nvidia'
+    },
+    [pscustomobject]@{
+        Vendor          = 'Gigabyte'
+        Kind            = 'Platform'
+        Buckets         = @('Gigabyte', 'Audio')
+        ProviderPattern = '^(gigabyte|giga-byte)'
+        ChassisPattern  = 'gigabyte|giga-byte'
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = $null
+        # WinRing0 is deliberately absent: it is a generic ring-0 helper that
+        # HWiNFO, OpenHardwareMonitor and others install under the same name.
+        ServiceNames    = @(
+            'gdrv', 'gdrv2', 'gdrv3', 'GigabyteUpdateService', 'GBTUpdService', 'GCC_Service',
+            'GCCService', 'AppCenterService', 'EasyTuneEngineService', 'RGBFusionService',
+            'GBT_Dynamic_Lighting_Service'
+        )
+        TaskPaths       = @('\GIGABYTE\')
+        TaskNamePattern = '^(GIGABYTE|GCC|GBT)'
+        Roots           = @(
+            'C:\Program Files\GIGABYTE',
+            'C:\Program Files (x86)\GIGABYTE',
+            'C:\ProgramData\GIGABYTE'
+        )
+        UserRoots       = @('GIGABYTE')
+        RegistryKeys    = @(
+            'HKLM:\SOFTWARE\GIGABYTE', 'HKLM:\SOFTWARE\WOW6432Node\GIGABYTE', 'HKCU:\SOFTWARE\GIGABYTE'
+        )
+        ProgramPattern  = '^(gigabyte|gbt_|rgb fusion|app center|smart backup|@bios|easytune|mbeasytune|mbstorage)'
+        AppxPattern     = '^gigabyte'
+    },
+    [pscustomobject]@{
+        Vendor          = 'Msi'
+        Kind            = 'Platform'
+        Buckets         = @('Msi', 'Audio')
+        ProviderPattern = '^(msi\b|micro-star)'
+        ChassisPattern  = 'micro-star|\bmsi\b'
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = $null
+        ServiceNames    = @(
+            'MSI_Center_Service', 'MSICentralServer', 'MSI Foundation Service', 'MSI_VoiceControl_Service',
+            'NTIOLib_X64', 'MSI_SDK', 'Dragon Center Service', 'Mystic_Light_Service', 'MSIService'
+        )
+        TaskPaths       = @('\MSI\')
+        TaskNamePattern = '^(MSI|Mystic|Dragon)'
+        Roots           = @(
+            'C:\Program Files\MSI',
+            'C:\Program Files (x86)\MSI',
+            'C:\ProgramData\MSI'
+        )
+        UserRoots       = @('MSI')
+        RegistryKeys    = @(
+            'HKLM:\SOFTWARE\MSI', 'HKLM:\SOFTWARE\WOW6432Node\MSI', 'HKCU:\SOFTWARE\MSI'
+        )
+        ProgramPattern  = '^(msi\b|msi center|dragon center|mystic light)'
+        AppxPattern     = '^(msi|micro-star)'
+    },
+    [pscustomobject]@{
+        Vendor          = 'AsRock'
+        Kind            = 'Platform'
+        Buckets         = @('AsRock', 'Audio')
+        ProviderPattern = '^asrock'
+        ChassisPattern  = 'asrock'
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = $null
+        ServiceNames    = @('AsrDrv', 'AsrDrv101', 'AsrDrv102', 'AsrDrv103', 'AsrOmgDrv', 'AsrRamDisk', 'AsrIbDrv')
+        TaskPaths       = @('\ASRock\')
+        TaskNamePattern = '^asrock'
+        Roots           = @(
+            'C:\Program Files\ASRock',
+            'C:\Program Files (x86)\ASRock',
+            'C:\ProgramData\ASRock',
+            'C:\Program Files\ASRock Utility',
+            'C:\Program Files (x86)\ASRock Utility'
+        )
+        UserRoots       = @('ASRock')
+        RegistryKeys    = @(
+            'HKLM:\SOFTWARE\ASRock', 'HKLM:\SOFTWARE\WOW6432Node\ASRock', 'HKCU:\SOFTWARE\ASRock'
+        )
+        ProgramPattern  = '^(asrock|polychrome|a-tuning)'
+        AppxPattern     = '^asrock'
+    },
+
+    # --- Laptop OEMs ---------------------------------------------------------
+    # Swept only with ghost EVIDENCE (see $OemEvidenceClasses), because every
+    # one of these also sells monitors, printers or peripherals that may be
+    # attached to the current desktop. Classes restricts their packages to
+    # platform classes for the same reason.
+    [pscustomobject]@{
+        Vendor          = 'Acer'
+        Kind            = 'Oem'
+        Buckets         = @('LaptopOem', 'Display', 'Audio', 'Power')
+        ProviderPattern = '^acer'
+        ChassisPattern  = 'acer'
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = @('System', 'Firmware', 'Battery', 'HIDClass', 'Keyboard', 'Extension', 'SoftwareComponent', 'SoftwareDevice')
+        ServiceNames    = @('AcerAirplaneModeController', 'ACCSvc', 'ACNSvc', 'epowersvc', 'QAService')
+        TaskPaths       = @('\Acer\')
+        TaskNamePattern = '^acer'
+        Roots           = @(
+            'C:\Program Files\Acer',
+            'C:\Program Files (x86)\Acer',
+            'C:\ProgramData\Acer'
+        )
+        UserRoots       = @('Acer')
+        RegistryKeys    = @('HKLM:\SOFTWARE\Acer', 'HKLM:\SOFTWARE\WOW6432Node\Acer', 'HKCU:\SOFTWARE\Acer')
+        ProgramPattern  = '^acer'
+        AppxPattern     = '^(acer|AcerIncorporated)'
+    },
+    [pscustomobject]@{
+        Vendor          = 'Dell'
+        Kind            = 'Oem'
+        Buckets         = @('LaptopOem', 'Display', 'Audio', 'Power')
+        ProviderPattern = '^dell'
+        ChassisPattern  = 'dell'
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = @('System', 'Firmware', 'Battery', 'HIDClass', 'Keyboard', 'Extension', 'SoftwareComponent', 'SoftwareDevice')
+        ServiceNames    = @(
+            'DellClientManagementService', 'DellDigitalDelivery', 'SupportAssistAgent', 'DDVDataCollector',
+            'DDVRulesProcessor', 'DDVCollectorSvcApi', 'DellTechHub', 'DellOptimizer', 'DellUpdate'
+        )
+        TaskPaths       = @('\Dell\')
+        TaskNamePattern = '^dell'
+        Roots           = @(
+            'C:\Program Files\Dell',
+            'C:\Program Files (x86)\Dell',
+            'C:\ProgramData\Dell'
+        )
+        UserRoots       = @('Dell')
+        RegistryKeys    = @('HKLM:\SOFTWARE\Dell', 'HKLM:\SOFTWARE\WOW6432Node\Dell', 'HKCU:\SOFTWARE\Dell')
+        ProgramPattern  = '^dell'
+        AppxPattern     = '^(dell|DellInc)'
+    },
+    [pscustomobject]@{
+        Vendor          = 'Hp'
+        Kind            = 'Oem'
+        Buckets         = @('LaptopOem', 'Display', 'Audio', 'Power')
+        ProviderPattern = '^(hp\b|hewlett)'
+        ChassisPattern  = 'hewlett|\bhp\b'
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = @('System', 'Firmware', 'Battery', 'HIDClass', 'Keyboard', 'Extension', 'SoftwareComponent', 'SoftwareDevice')
+        ServiceNames    = @(
+            'HPAppHelperCap', 'HPDiagsCap', 'HPNetworkCap', 'HPSysInfoCap', 'HpTouchpointAnalyticsService',
+            'HPOmenCap', 'HPSupportSolutionsFrameworkService'
+        )
+        TaskPaths       = @('\HP\', '\Hewlett-Packard\')
+        TaskNamePattern = '^hp'
+        Roots           = @(
+            'C:\Program Files\HP',
+            'C:\Program Files (x86)\HP',
+            'C:\ProgramData\HP',
+            'C:\Program Files\Hewlett-Packard',
+            'C:\Program Files (x86)\Hewlett-Packard',
+            'C:\ProgramData\Hewlett-Packard'
+        )
+        UserRoots       = @('HP', 'Hewlett-Packard')
+        RegistryKeys    = @(
+            'HKLM:\SOFTWARE\HP', 'HKLM:\SOFTWARE\WOW6432Node\HP', 'HKCU:\SOFTWARE\HP',
+            'HKLM:\SOFTWARE\Hewlett-Packard', 'HKLM:\SOFTWARE\WOW6432Node\Hewlett-Packard', 'HKCU:\SOFTWARE\Hewlett-Packard'
+        )
+        ProgramPattern  = '^(hp\b|hewlett|myhp|omen)'
+        # HP Smart and HP Printer Control belong to a printer, not a laptop.
+        AppxPattern     = '^AD2F1837\.(?!HPSmart|HPPrinterControl)'
+    },
+    [pscustomobject]@{
+        Vendor          = 'Lenovo'
+        Kind            = 'Oem'
+        Buckets         = @('LaptopOem', 'Display', 'Audio', 'Power')
+        ProviderPattern = '^lenovo'
+        ChassisPattern  = 'lenovo'
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = @('System', 'Firmware', 'Battery', 'HIDClass', 'Keyboard', 'Extension', 'SoftwareComponent', 'SoftwareDevice')
+        ServiceNames    = @('LenovoVantageService', 'ImControllerService', 'LITSSVC', 'LenovoSystemUpdateService', 'LenovoNowService')
+        TaskPaths       = @('\Lenovo\')
+        TaskNamePattern = '^lenovo'
+        Roots           = @(
+            'C:\Program Files\Lenovo',
+            'C:\Program Files (x86)\Lenovo',
+            'C:\ProgramData\Lenovo'
+        )
+        UserRoots       = @('Lenovo')
+        RegistryKeys    = @('HKLM:\SOFTWARE\Lenovo', 'HKLM:\SOFTWARE\WOW6432Node\Lenovo', 'HKCU:\SOFTWARE\Lenovo')
+        ProgramPattern  = '^lenovo'
+        AppxPattern     = '^(E046963F|LenovoCompanyLimited|lenovo)'
+    },
+
+    # --- Laptop-only components --------------------------------------------
+    # Touchpads, fingerprint readers, laptop BIOS, laptop Wi-Fi, card readers,
+    # NFC, laptop audio codecs. The live-binding gate is their only presence
+    # check; Classes keeps each to the classes its hardware actually uses.
+    [pscustomobject]@{
+        Vendor          = 'Elan'
+        Kind            = 'Component'
+        Buckets         = @('LaptopOem')
+        ProviderPattern = '^elan'
+        ChassisPattern  = $null
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = @('HIDClass', 'Mouse', 'Keyboard', 'System', 'Biometric', 'Extension', 'SoftwareComponent')
+        ServiceNames    = @('ETDService', 'ETDI2C', 'ElanFPService', 'ETD')
+        TaskPaths       = @()
+        TaskNamePattern = '^elan'
+        Roots           = @(
+            'C:\Program Files\Elantech',
+            'C:\Program Files (x86)\Elantech',
+            'C:\Program Files\ELAN',
+            'C:\Program Files (x86)\ELAN',
+            'C:\ProgramData\ELAN'
+        )
+        UserRoots       = @('Elantech', 'ELAN')
+        RegistryKeys    = @('HKLM:\SOFTWARE\Elantech', 'HKLM:\SOFTWARE\WOW6432Node\Elantech', 'HKCU:\SOFTWARE\Elantech')
+        ProgramPattern  = '^(elan|elantech)'
+        AppxPattern     = '^elan'
+    },
+    [pscustomobject]@{
+        Vendor          = 'Synaptics'
+        Kind            = 'Component'
+        Buckets         = @('LaptopOem')
+        ProviderPattern = '^synaptics'
+        ChassisPattern  = $null
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = @('HIDClass', 'Mouse', 'Keyboard', 'System', 'Biometric', 'Extension', 'SoftwareComponent')
+        ServiceNames    = @('SynTPEnhService', 'SynTP', 'SynTPEnh', 'SynapticsFP')
+        TaskPaths       = @()
+        TaskNamePattern = '^synaptics'
+        Roots           = @(
+            'C:\Program Files\Synaptics',
+            'C:\Program Files (x86)\Synaptics',
+            'C:\ProgramData\Synaptics'
+        )
+        UserRoots       = @('Synaptics')
+        RegistryKeys    = @('HKLM:\SOFTWARE\Synaptics', 'HKLM:\SOFTWARE\WOW6432Node\Synaptics', 'HKCU:\SOFTWARE\Synaptics')
+        ProgramPattern  = '^synaptics'
+        AppxPattern     = '^synaptics'
+    },
+    [pscustomobject]@{
+        Vendor          = 'Insyde'
+        Kind            = 'Component'
+        Buckets         = @('LaptopOem')
+        ProviderPattern = '^insyde'
+        ChassisPattern  = $null
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = @('Firmware', 'System')
+        ServiceNames    = @()
+        TaskPaths       = @()
+        TaskNamePattern = $null
+        Roots           = @('C:\Program Files\Insyde', 'C:\Program Files (x86)\Insyde')
+        UserRoots       = @()
+        RegistryKeys    = @('HKLM:\SOFTWARE\Insyde', 'HKLM:\SOFTWARE\WOW6432Node\Insyde')
+        ProgramPattern  = '^insyde'
+        AppxPattern     = $null
+    },
+    [pscustomobject]@{
+        Vendor          = 'QualcommAtheros'
+        Kind            = 'Component'
+        Buckets         = @('LaptopOem')
+        ProviderPattern = '^(qualcomm|atheros)'
+        ChassisPattern  = $null
+        # A Snapdragon X machine reports "Qualcomm Technologies Inc" here.
+        CpuPattern      = 'qualcomm'
+        GpuPattern      = 'qualcomm|adreno'
+        Classes         = @('Net', 'Bluetooth', 'System', 'Extension', 'SoftwareComponent')
+        ServiceNames    = @('AtherosSvc', 'Qcamain10x64', 'QWLANSVC')
+        TaskPaths       = @()
+        TaskNamePattern = $null
+        Roots           = @(
+            'C:\Program Files\Qualcomm',
+            'C:\Program Files (x86)\Qualcomm',
+            'C:\Program Files\Qualcomm Atheros',
+            'C:\Program Files (x86)\Qualcomm Atheros',
+            'C:\ProgramData\Qualcomm'
+        )
+        UserRoots       = @()
+        RegistryKeys    = @('HKLM:\SOFTWARE\Qualcomm', 'HKLM:\SOFTWARE\WOW6432Node\Qualcomm', 'HKLM:\SOFTWARE\Atheros')
+        ProgramPattern  = '^(qualcomm|atheros)'
+        AppxPattern     = '^qualcomm'
+    },
+    [pscustomobject]@{
+        Vendor          = 'Killer'
+        Kind            = 'Component'
+        Buckets         = @('LaptopOem')
+        ProviderPattern = '^(rivet|killer)'
+        ChassisPattern  = $null
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = @('Net', 'Bluetooth', 'System', 'Extension', 'SoftwareComponent')
+        ServiceNames    = @('KillerNetworkService', 'Killer Network Service', 'KNDBWM', 'KAPSService', 'KillerAnalyticsService', 'KillerIntelligenceCenterService')
+        TaskPaths       = @('\Killer\', '\Rivet Networks\')
+        TaskNamePattern = '^killer'
+        Roots           = @(
+            'C:\Program Files\Killer Networking',
+            'C:\Program Files (x86)\Killer Networking',
+            'C:\ProgramData\Killer Networking',
+            'C:\Program Files\Rivet Networks',
+            'C:\ProgramData\Rivet Networks'
+        )
+        UserRoots       = @('Killer Networking', 'Rivet Networks')
+        RegistryKeys    = @('HKLM:\SOFTWARE\Rivet Networks', 'HKLM:\SOFTWARE\WOW6432Node\Rivet Networks', 'HKLM:\SOFTWARE\Killer Networking')
+        ProgramPattern  = '^(killer|rivet)'
+        AppxPattern     = '^(RivetNetworks|Killer)'
+    },
+    [pscustomobject]@{
+        Vendor          = 'Ricoh'
+        Kind            = 'Component'
+        Buckets         = @('LaptopOem')
+        # Ricoh also makes printers. Classes keeps this to the card reader.
+        ProviderPattern = '^ricoh'
+        ChassisPattern  = $null
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = @('SDHost', 'System', 'Extension')
+        ServiceNames    = @('rimspci', 'rimsptsk', 'rixdptsk', 'risdptsk', 'rismxdp')
+        TaskPaths       = @()
+        TaskNamePattern = $null
+        Roots           = @()
+        UserRoots       = @()
+        RegistryKeys    = @()
+        ProgramPattern  = '^ricoh.*(card|media|reader)'
+        AppxPattern     = $null
+    },
+    [pscustomobject]@{
+        Vendor          = 'Nxp'
+        Kind            = 'Component'
+        Buckets         = @('LaptopOem')
+        ProviderPattern = '^nxp'
+        ChassisPattern  = $null
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = @('Proximity', 'System', 'Extension', 'SoftwareComponent')
+        ServiceNames    = @('NxpNfcService')
+        TaskPaths       = @()
+        TaskNamePattern = $null
+        Roots           = @()
+        UserRoots       = @()
+        RegistryKeys    = @()
+        ProgramPattern  = '^nxp'
+        AppxPattern     = $null
+    },
+    [pscustomobject]@{
+        Vendor          = 'Conexant'
+        Kind            = 'Component'
+        Buckets         = @('LaptopOem', 'Audio')
+        ProviderPattern = '^conexant'
+        ChassisPattern  = $null
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = @('MEDIA', 'AudioProcessingObject', 'System', 'Extension', 'SoftwareComponent')
+        ServiceNames    = @('CxAudMsg', 'CxUtilSvc', 'CxAudioSvc')
+        TaskPaths       = @()
+        TaskNamePattern = $null
+        Roots           = @(
+            'C:\Program Files\Conexant',
+            'C:\Program Files (x86)\Conexant',
+            'C:\ProgramData\Conexant',
+            'C:\Program Files\CONEXANT',
+            'C:\Program Files (x86)\CONEXANT'
+        )
+        UserRoots       = @()
+        RegistryKeys    = @('HKLM:\SOFTWARE\Conexant', 'HKLM:\SOFTWARE\WOW6432Node\Conexant')
+        ProgramPattern  = '^conexant'
+        AppxPattern     = '^conexant'
+    },
+    [pscustomobject]@{
+        Vendor          = 'Alps'
+        Kind            = 'Component'
+        Buckets         = @('LaptopOem')
+        ProviderPattern = '^alps'
+        ChassisPattern  = $null
+        CpuPattern      = $null
+        GpuPattern      = $null
+        Classes         = @('HIDClass', 'Mouse', 'Keyboard', 'System')
+        ServiceNames    = @('ApHidMonitorService')
+        TaskPaths       = @()
+        TaskNamePattern = $null
+        Roots           = @(
+            'C:\Program Files\Apoint2K',
+            'C:\Program Files (x86)\Apoint2K',
+            'C:\Program Files\Alps',
+            'C:\Program Files (x86)\Alps'
+        )
+        UserRoots       = @()
+        RegistryKeys    = @('HKLM:\SOFTWARE\Alps', 'HKLM:\SOFTWARE\WOW6432Node\Alps')
+        ProgramPattern  = '^alps'
+        AppxPattern     = $null
     }
 )
 
@@ -373,7 +955,9 @@ $BucketInfHints = [ordered]@{
     Audio   = @(
         'intcaudiobus', 'intcoed', 'intcdaud', 'intcusb', 'intcbtau', 'intcsdw',
         'intcsdwbus', 'intcdmic', 'intcsst', 'mshdadac', 'hdbusext',
-        'hdxsstasus', 'hdx_asusext', 'dolby'
+        'hdxsstasus', 'hdx_asusext', 'dolby',
+        # Display audio of the discrete GPUs: NVIDIA HD Audio, AMD/ATI HD Audio.
+        'nvhda', 'atihdwt', 'amdhdaud'
     )
     Power   = @(
         'dtt_sw', 'dtt_ext', 'iccwdt', 'ipf_cpu', 'ipf_acpi', 'ipf_uf',
@@ -404,6 +988,35 @@ $ForbiddenDriverClasses = @(
 # boot volume, so the operator gets told rather than surprised.
 $CautionDriverClasses = @('SCSIAdapter', 'Net')
 
+# Driver classes treated as PLATFORM for the discovery path: classes in which
+# an unbound package means hardware that is gone, not a peripheral that is
+# unplugged. Printer, Image, Camera, HIDClass, USB, Bluetooth and WPD are
+# deliberately absent - and so are Monitor and Net, because on a real census a
+# switched-off AOC monitor and an iPhone's USB-tethering NIC both showed up
+# here as "orphaned". A catalogue vendor may still list Net in its own Classes,
+# where the vendor's identity (laptop Wi-Fi) settles the question.
+$PlatformDriverClasses = @(
+    'System', 'Display', 'MEDIA', 'AudioProcessingObject', 'SCSIAdapter', 'HDC',
+    'Firmware', 'Extension', 'SoftwareComponent', 'Battery', 'Processor'
+)
+
+# Instance-ID roots that identify BUS-ENUMERATED devices. -Scope Platform
+# removes not-present devnodes under these roots only; USB\, HID\, BTH*, SWD\,
+# ROOT\, USBSTOR\ and UMB\ are never touched because "not present" there means
+# "unplugged".
+$PlatformGhostBusPrefixes = @('PCI\', 'ACPI\', 'SCSI\', 'STORAGE\', 'DISPLAY\', 'PCIIDE\', 'IDE\')
+
+# Classes in which a not-present devnode from a laptop OEM is EVIDENCE that
+# this image came from one of that OEM's machines. A not-present Dell monitor
+# is not evidence; a not-present Dell battery or hotkey controller is.
+$OemEvidenceClasses = @('System', 'Firmware', 'Battery', 'HIDClass', 'Keyboard', 'Extension', 'SoftwareComponent', 'SoftwareDevice')
+
+# Vendor-published software that is NOT tied to the vendor's hardware. Matched
+# against the registered DisplayName; kept and reported rather than uninstalled.
+$HardwareAgnosticPrograms = @(
+    '^msi afterburner', '^rivatuner', '^geforce now', '^dell display manager', '^amd link'
+)
+
 # Kernel-mode services that are INBOX WINDOWS COMPONENTS despite their vendor
 # names. Every one of these is present on machines that have never seen the
 # vendor's hardware, several run at Start=Boot, and removing any is a bugcheck
@@ -415,7 +1028,14 @@ $InboxVendorNamedServices = @(
     'iaLPSS2i_GPIO2_BXT_P', 'iaLPSS2i_GPIO2_CNL', 'iaLPSS2i_GPIO2_GLK',
     'iaLPSS2i_I2C_BXT_P', 'iaLPSS2i_I2C_CNL', 'iaLPSS2i_I2C_GLK',
     'iaLPSS2_GPIO2', 'iaLPSS2_GPIO2_ADL', 'iaLPSS2_I2C_ADL', 'IntcAudioBus',
-    'IntcOED', 'MEIx64', 'IntelGNA', 'ibtusb', 'Netwtw14'
+    'IntcOED', 'MEIx64', 'IntelGNA', 'ibtusb', 'Netwtw14',
+    # AMD inbox: on every Windows 11 image, loaded at boot on an AMD board. The
+    # binaries carry an AMD CompanyName, so without this veto the CompanyName
+    # path would hand them to the AMD bucket on an Intel machine - and the
+    # drive's NEXT move onto an AMD board would then have no processor driver.
+    'AmdK8', 'AmdPPM', 'amdxe', 'amdsata', 'amdxata', 'amdsbs', 'amdi2c',
+    # Realtek inbox NIC driver, shipped with Windows.
+    'rt640x64'
 )
 
 # Roots that may NEVER be handed to Remove-Item, no matter what the census says.
@@ -620,6 +1240,16 @@ function Get-MachineIdentity {
     try { $sys   = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop } catch { }
     try { $cpu   = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1 } catch { }
 
+    # Every PRESENT video controller, including a disabled one: a GPU that is
+    # in the slot is current hardware whatever its driver state.
+    $gpus = @()
+    try {
+        $gpus = @(Get-CimInstance Win32_VideoController -ErrorAction Stop | ForEach-Object {
+            [pscustomobject]@{ Name = [string]$_.Name; Vendor = [string]$_.AdapterCompatibility }
+        })
+    }
+    catch { }
+
     [pscustomobject]@{
         BoardManufacturer  = if ($board) { [string]$board.Manufacturer } else { '' }
         BoardProduct       = if ($board) { [string]$board.Product } else { '' }
@@ -627,6 +1257,7 @@ function Get-MachineIdentity {
         SystemModel        = if ($sys)   { [string]$sys.Model } else { '' }
         CpuName            = if ($cpu)   { [string]$cpu.Name } else { '' }
         CpuManufacturer    = if ($cpu)   { [string]$cpu.Manufacturer } else { '' }
+        Gpus               = $gpus
     }
 }
 
@@ -727,18 +1358,24 @@ function Get-LiveDriverPackageNames {
 # Route a package to a -Scope bucket. Hints first (specific), class second
 # (general), vendor default last.
 function Get-PackageBucket {
-    param($Package, [string]$Vendor)
+    param($Package, $VendorProfile)
 
+    $routed = $null
     foreach ($bucket in $BucketInfHints.Keys) {
         foreach ($hint in $BucketInfHints[$bucket]) {
-            if ($Package.Original -like "*$hint*") { return $bucket }
+            if ($Package.Original -like "*$hint*") { $routed = $bucket; break }
+        }
+        if ($routed) { break }
+    }
+    if (-not $routed) {
+        foreach ($bucket in $BucketClassHints.Keys) {
+            if ($BucketClassHints[$bucket] -contains $Package.Class) { $routed = $bucket; break }
         }
     }
-    foreach ($bucket in $BucketClassHints.Keys) {
-        if ($BucketClassHints[$bucket] -contains $Package.Class) { return $bucket }
-    }
-    if ($Vendor -eq 'Asus') { return 'Asus' }
-    return 'IntelChipset'
+    # A hint may only move a package to a bucket the vendor declares. An Acer
+    # battery package is LaptopOem residue, not Intel Dynamic Tuning.
+    if ($routed -and ($VendorProfile.Buckets -contains $routed)) { return $routed }
+    return $VendorProfile.Buckets[0]
 }
 
 # Re-verify a package immediately before deletion. oemNN slots are recycled, so
@@ -868,28 +1505,43 @@ function Get-VendorServices {
 function Get-VendorScheduledTasks {
     param($VendorProfile)
     $out = @()
+
+    $convert = {
+        param($t)
+        $actions = @()
+        $anyMissing = $false
+        foreach ($a in $t.Actions) {
+            $exe = ''
+            try { $exe = [string]$a.Execute } catch { }
+            if ($exe) {
+                $clean = $exe.Trim().Trim('"')
+                $actions += $clean
+                if (-not (Test-Path -LiteralPath $clean)) { $anyMissing = $true }
+            }
+        }
+        [pscustomobject]@{
+            TaskPath   = $t.TaskPath
+            TaskName   = $t.TaskName
+            State      = [string]$t.State
+            Actions    = ($actions -join '; ')
+            ExeMissing = $anyMissing
+        }
+    }
+
     foreach ($path in $VendorProfile.TaskPaths) {
         $tasks = $null
         try { $tasks = Get-ScheduledTask -TaskPath $path -ErrorAction Stop } catch { continue }
-        foreach ($t in $tasks) {
-            $actions = @()
-            $anyMissing = $false
-            foreach ($a in $t.Actions) {
-                $exe = ''
-                try { $exe = [string]$a.Execute } catch { }
-                if ($exe) {
-                    $clean = $exe.Trim().Trim('"')
-                    $actions += $clean
-                    if (-not (Test-Path -LiteralPath $clean)) { $anyMissing = $true }
-                }
-            }
-            $out += [pscustomobject]@{
-                TaskPath   = $t.TaskPath
-                TaskName   = $t.TaskName
-                State      = [string]$t.State
-                Actions    = ($actions -join '; ')
-                ExeMissing = $anyMissing
-            }
+        foreach ($t in $tasks) { $out += (& $convert $t) }
+    }
+
+    # NVIDIA and AMD register at the ROOT of the task library, by name:
+    # NvTmRep_CrashReport4_*, NvDriverUpdateCheckDaily_*, StartCN, StartDVR.
+    if ($VendorProfile.TaskNamePattern) {
+        $rootTasks = $null
+        try { $rootTasks = Get-ScheduledTask -TaskPath '\' -ErrorAction Stop } catch { }
+        foreach ($t in @($rootTasks)) {
+            if ($null -eq $t) { continue }
+            if ($t.TaskName -match $VendorProfile.TaskNamePattern) { $out += (& $convert $t) }
         }
     }
     return $out
@@ -1099,7 +1751,7 @@ function Get-VendorPrograms {
         if (-not [string]::IsNullOrWhiteSpace($pub)) {
             $isVendor = ($pub -match $VendorProfile.ProviderPattern)
         }
-        elseif (-not [string]::IsNullOrWhiteSpace($name)) {
+        elseif (-not [string]::IsNullOrWhiteSpace($name) -and $VendorProfile.ProgramPattern) {
             $isVendor = ($name -match $VendorProfile.ProgramPattern)
         }
         if (-not $isVendor) { continue }
@@ -1231,12 +1883,15 @@ function Get-VendorPrograms {
 # hidden device" recipe: that also removes unplugged USB devices, Bluetooth
 # pairings and volume snapshots, which is how people lose working peripherals.
 function Get-GhostDevices {
-    param([string[]]$ProviderPatterns, [string[]]$ExtraHardwareIds, [switch]$IncludePhantomBattery)
+    param($Devices, [string[]]$ProviderPatterns, [string[]]$ExtraHardwareIds, [switch]$IncludePhantomBattery, [string[]]$BusPrefixes)
 
     $out = @()
     $devices = @()
-    try { $devices = @(Get-PnpDevice -ErrorAction Stop | Where-Object { $_.Status -ne 'OK' }) }
-    catch { return $out }
+    if ($null -ne $Devices) { $devices = @($Devices) }
+    else {
+        try { $devices = @(Get-PnpDevice -ErrorAction Stop | Where-Object { $_.Status -ne 'OK' }) }
+        catch { return $out }
+    }
 
     foreach ($d in $devices) {
         $keep = $false
@@ -1258,12 +1913,90 @@ function Get-GhostDevices {
         }
         if (-not $keep) { continue }
 
+        # Optional bus restriction: for a vendor this script has no profile
+        # for, only bus-enumerated devnodes are ever touched.
+        if ($BusPrefixes -and $BusPrefixes.Count -gt 0) {
+            $onBus = $false
+            foreach ($pre in $BusPrefixes) {
+                if (([string]$d.InstanceId).StartsWith($pre, [StringComparison]::OrdinalIgnoreCase)) { $onBus = $true; break }
+            }
+            if (-not $onBus) { continue }
+        }
+
         $out += [pscustomobject]@{
             Status       = [string]$d.Status
             Class        = [string]$d.Class
             FriendlyName = [string]$d.FriendlyName
             InstanceId   = [string]$d.InstanceId
             Reason       = $why
+        }
+    }
+    return $out
+}
+
+# The reused-drive case. Every build leaves its bus-enumerated hardware behind
+# as not-present devnodes: the PCI bridges and controllers of the old board, the
+# old CPU's processor nodes, ACPI devices, disks, volumes, storage controllers
+# and monitors. For a device on one of these buses "not present" cannot mean
+# "unplugged" - it means gone - so removing the devnode loses nothing. USB, HID,
+# Bluetooth and software devices are NEVER included here, whatever their state.
+function Get-PlatformGhostDevices {
+    param($Devices)
+    $out = @()
+    foreach ($d in @($Devices)) {
+        if ($null -eq $d) { continue }
+        $id  = [string]$d.InstanceId
+        $bus = $null
+        foreach ($pre in $PlatformGhostBusPrefixes) {
+            if ($id.StartsWith($pre, [StringComparison]::OrdinalIgnoreCase)) { $bus = $pre.TrimEnd('\'); break }
+        }
+        if ($null -eq $bus) { continue }
+        $out += [pscustomobject]@{
+            Status       = [string]$d.Status
+            Class        = [string]$d.Class
+            FriendlyName = [string]$d.FriendlyName
+            InstanceId   = $id
+            Reason       = "not-present $bus device"
+        }
+    }
+    return $out
+}
+
+# Discovery for the vendor this script has no profile for yet. A provider with
+# packages in the store and NOTHING bound to any of them is, on a reused drive,
+# almost always a previous build. It is reported every run and removed only
+# when the operator names -Scope OtherVendors - and even then only packages in
+# platform driver classes, never a printer, camera, HID or USB peripheral whose
+# owner is merely unplugged.
+function Get-OtherVendorCandidates {
+    param($Packages, $LiveNames)
+
+    $byProvider = @{}
+    foreach ($pkg in @($Packages)) {
+        $prov = [string]$pkg.Provider
+        if ([string]::IsNullOrWhiteSpace($prov)) { continue }
+        if ($prov -match '^microsoft') { continue }
+        $known = $false
+        foreach ($vp in $VendorProfiles) {
+            if ($prov -match $vp.ProviderPattern) { $known = $true; break }
+        }
+        if ($known) { continue }
+        if (-not $byProvider.ContainsKey($prov)) { $byProvider[$prov] = @() }
+        $byProvider[$prov] += $pkg
+    }
+
+    $out = @()
+    foreach ($prov in $byProvider.Keys) {
+        $pkgs = @($byProvider[$prov])
+        $live = @($pkgs | Where-Object { $LiveNames.Contains($_.Published) }).Count
+        if ($live -gt 0) { continue }
+        $sweepable = @($pkgs | Where-Object {
+            ($PlatformDriverClasses -contains $_.Class) -and ($ForbiddenDriverClasses -notcontains $_.Class)
+        })
+        $out += [pscustomobject]@{
+            Provider = $prov
+            Total    = $pkgs.Count
+            Packages = $sweepable
         }
     }
     return $out
@@ -1349,6 +2082,7 @@ Write-Section 'CURRENT HARDWARE'
 Write-Log ("Board  : {0} {1}" -f $machine.BoardManufacturer, $machine.BoardProduct)
 Write-Log ("System : {0} {1}" -f $machine.SystemManufacturer, $machine.SystemModel)
 Write-Log ("CPU    : {0} [{1}]" -f $machine.CpuName, $machine.CpuManufacturer)
+foreach ($g in $machine.Gpus) { Write-Log ("GPU    : {0} [{1}]" -f $g.Name, $g.Vendor) }
 
 Write-Section 'DRIVER STORE BINDING MAP'
 $allPackages = @(Get-DriverPackages)
@@ -1379,42 +2113,109 @@ foreach ($k in ($liveProviders.Keys | Sort-Object)) {
     Write-Log ("    {0,-42} {1} package(s)" -f $k, $liveProviders[$k])
 }
 
-# --- Per-vendor eligibility ----------------------------------------------
+# --- Per-vendor, per-bucket eligibility ----------------------------------
+#
+# The unit of refusal is the (vendor, bucket) pair, not the vendor. Evidence
+# that a vendor is CURRENT refuses its vendor-owned bucket - programs, services,
+# folders, hives - without exception. The cross-vendor package buckets
+# (Display / Audio / Power) are refused per bucket, so that an AMD CPU does not
+# shield a dead Radeon package and an Intel F-SKU can shed an iGPU package it
+# never binds. Every package still passes the live-binding gate individually.
 
-$eligibleVendors = @()
+# Route every LIVE package to (vendor, bucket) once, so the per-bucket live
+# count is a lookup rather than a rescan.
+$liveByVendorBucket = @{}
+foreach ($pkg in $allPackages) {
+    if (-not $liveNames.Contains($pkg.Published)) { continue }
+    foreach ($vp in $VendorProfiles) {
+        if ($pkg.Provider -notmatch $vp.ProviderPattern) { continue }
+        $b   = Get-PackageBucket -Package $pkg -VendorProfile $vp
+        $key = "$($vp.Vendor)|$b"
+        if (-not $liveByVendorBucket.ContainsKey($key)) { $liveByVendorBucket[$key] = 0 }
+        $liveByVendorBucket[$key]++
+    }
+}
+
+# Not-present devnodes, read ONCE. Used for OEM evidence here and for every
+# ghost-device census below.
+$ghostDevices = @()
+try { $ghostDevices = @(Get-PnpDevice -ErrorAction Stop | Where-Object { $_.Status -ne 'OK' }) } catch { }
+
+$eligibility = @{}
 foreach ($vp in $VendorProfiles) {
-    $refusals = @()
+    $owned   = $vp.Buckets[0]
+    $reasons = @{}
+    foreach ($b in $vp.Buckets) { $reasons[$b] = @() }
 
     if ($vp.ChassisPattern) {
         $chassis = "$($machine.BoardManufacturer) $($machine.SystemManufacturer)"
         if ($chassis -match $vp.ChassisPattern) {
-            $refusals += "current board/system manufacturer is '$chassis'"
+            foreach ($b in $vp.Buckets) { $reasons[$b] += "current board/system manufacturer is '$chassis'" }
         }
     }
     if ($vp.CpuPattern -and $machine.CpuManufacturer -match $vp.CpuPattern) {
-        $refusals += "current CPU is '$($machine.CpuManufacturer)'"
+        foreach ($b in $vp.Buckets) {
+            if ($b -eq 'Display') { continue }
+            $reasons[$b] += "current CPU is '$($machine.CpuManufacturer)'"
+        }
+    }
+    if ($vp.GpuPattern) {
+        foreach ($gpu in $machine.Gpus) {
+            if ("$($gpu.Name) $($gpu.Vendor)" -match $vp.GpuPattern) {
+                foreach ($b in $vp.Buckets) { $reasons[$b] += "current video controller is '$($gpu.Name)'" }
+                break
+            }
+        }
     }
 
-    $liveCount = 0
-    foreach ($k in $liveProviders.Keys) {
-        if ($k -match $vp.ProviderPattern) { $liveCount += $liveProviders[$k] }
+    $liveTotal = 0
+    foreach ($b in $vp.Buckets) {
+        $n = 0
+        if ($liveByVendorBucket.ContainsKey("$($vp.Vendor)|$b")) { $n = $liveByVendorBucket["$($vp.Vendor)|$b"] }
+        $liveTotal += $n
+        if ($n -gt 0 -and $b -ne $owned) {
+            $reasons[$b] += "$n live driver package(s) route to this bucket"
+        }
     }
-    if ($liveCount -gt 0) {
-        $refusals += "$liveCount driver package(s) are bound to connected devices"
+    if ($liveTotal -gt 0) {
+        $reasons[$owned] += "$liveTotal driver package(s) are bound to connected devices"
     }
 
-    if ($refusals.Count -gt 0) {
-        Write-Log ("REFUSED vendor '{0}': {1}. This vendor's hardware is present on this machine." -f `
-            $vp.Vendor, ($refusals -join '; ')) 'REFUSE'
-        continue
+    # OEM evidence: a vendor that also makes monitors and peripherals is swept
+    # only when this image demonstrably came from one of its machines.
+    if ($vp.Kind -eq 'Oem') {
+        $evidence = @($ghostDevices | Where-Object {
+            ([string]$_.Manufacturer) -match $vp.ProviderPattern -and ($OemEvidenceClasses -contains [string]$_.Class)
+        })
+        if ($evidence.Count -eq 0) {
+            foreach ($b in $vp.Buckets) { $reasons[$b] += 'no not-present platform devnode of this OEM (no evidence this image came from its machine)' }
+        }
     }
 
-    Write-Log ("Vendor '{0}' is eligible: no chassis match, no CPU match, zero live driver bindings." -f $vp.Vendor) 'OK'
-    $eligibleVendors += $vp
+    $buckets = @{}
+    foreach ($b in $vp.Buckets) { $buckets[$b] = ($reasons[$b].Count -eq 0) }
+    $eligibility[$vp.Vendor] = [pscustomobject]@{ Owned = $buckets[$owned]; Buckets = $buckets; Reasons = $reasons }
+
+    if ($buckets[$owned]) {
+        Write-Log ("Vendor '{0}' is eligible: no chassis, CPU or GPU match, zero live driver bindings." -f $vp.Vendor) 'OK'
+    }
+    else {
+        Write-Log ("REFUSED vendor '{0}': {1}." -f `
+            $vp.Vendor, (($reasons[$owned] | Select-Object -Unique) -join '; ')) 'REFUSE'
+        $stillOpen = @($vp.Buckets | Where-Object { $_ -ne $owned -and $buckets[$_] })
+        if ($stillOpen.Count -gt 0) {
+            Write-Log ("    ...but its unbound packages remain eligible under -Scope {0}." -f ($stillOpen -join ',')) 'INFO'
+        }
+    }
 }
 
-if ($eligibleVendors.Count -eq 0 -and ($Scope | Where-Object { $_ -ne 'Startup' }).Count -gt 0) {
-    Write-Log 'Every vendor bucket was refused. Only -Scope Startup work (if requested) will run.' 'WARN'
+$eligibleVendors = @($VendorProfiles | Where-Object { $eligibility[$_.Vendor].Owned })
+$anyBucketOpen   = $false
+foreach ($vp in $VendorProfiles) {
+    foreach ($b in $vp.Buckets) { if ($eligibility[$vp.Vendor].Buckets[$b]) { $anyBucketOpen = $true } }
+}
+if (-not $anyBucketOpen -and ($Scope | Where-Object { $_ -notin @('Startup', 'Platform', 'OtherVendors') }).Count -gt 0) {
+    Write-Log 'Every vendor bucket was refused. Only Startup, Platform and OtherVendors work (if requested) will run.' 'WARN'
 }
 
 # --- Build the removal plan ----------------------------------------------
@@ -1433,13 +2234,19 @@ $plan = [ordered]@{
     Orphans  = @()
 }
 
-foreach ($vp in $eligibleVendors) {
+foreach ($vp in $VendorProfiles) {
+    $elig = $eligibility[$vp.Vendor]
+
+    # Packages: per-bucket eligibility, the vendor's own class allow-list, then
+    # the live-binding gate - which is re-applied at deletion time regardless.
     $vendorPkgs = @($allPackages | Where-Object {
         $_.Provider -match $vp.ProviderPattern -and -not $liveNames.Contains($_.Published)
     })
     foreach ($pkg in $vendorPkgs) {
-        $bucket = Get-PackageBucket -Package $pkg -Vendor $vp.Vendor
+        $bucket = Get-PackageBucket -Package $pkg -VendorProfile $vp
         if ($Scope -notcontains $bucket) { continue }
+        if (-not $elig.Buckets[$bucket]) { continue }
+        if ($vp.Classes -and ($vp.Classes -notcontains $pkg.Class)) { continue }
         $plan.Packages += [pscustomobject]@{
             Vendor = $vp.Vendor; Bucket = $bucket; Package = $pkg
         }
@@ -1459,13 +2266,14 @@ foreach ($vp in $eligibleVendors) {
         }
     }
 
-    # Vendor-owned buckets get services/roots/registry/programs. A run scoped to
-    # a single cross-vendor bucket (-Scope Audio) still sweeps that bucket's
-    # driver packages above, but deliberately does NOT tear down the vendor's
-    # whole service and folder footprint - that belongs to the vendor's own
-    # bucket, and asking for "audio" is not asking for that.
-    $vendorBuckets = if ($vp.Vendor -eq 'Asus') { @('Asus') } else { @('IntelChipset', 'Display', 'Audio', 'Power') }
-    $vendorInScope = @($Scope | Where-Object { $vendorBuckets -contains $_ }).Count -gt 0
+    # The vendor-owned bucket gets services/roots/registry/programs, and only
+    # when the vendor is eligible outright. A run scoped to a cross-vendor
+    # bucket (-Scope Audio) still sweeps that bucket's driver packages above,
+    # but deliberately does NOT tear down the vendor's whole service and folder
+    # footprint - that belongs to the vendor's own bucket, and asking for
+    # "audio" is not asking for that.
+    $ownedBucket   = $vp.Buckets[0]
+    $vendorInScope = ($Scope -contains $ownedBucket) -and $elig.Owned
 
     if ($vendorInScope) {
         foreach ($svc in (Get-VendorServices -VendorProfile $vp -RemovablePackageDirs $pkgDirs)) {
@@ -1478,18 +2286,32 @@ foreach ($vp in $eligibleVendors) {
             if (Test-Path $rk) { $plan.RegKeys += [pscustomobject]@{ Vendor = $vp.Vendor; Key = $rk } }
         }
         foreach ($prog in (Get-VendorPrograms -VendorProfile $vp)) {
+            # Vendor-published software that is NOT tied to the vendor's
+            # hardware (MSI Afterburner on a Gigabyte board, GeForce NOW on a
+            # Radeon machine) is kept, and said so.
+            $agnostic = $false
+            foreach ($pat in $HardwareAgnosticPrograms) {
+                if ($prog.Name -match $pat) { $agnostic = $true; break }
+            }
+            if ($agnostic) {
+                Write-Log ("KEEP {0}: hardware-agnostic software, not residue." -f $prog.Name) 'INFO'
+                continue
+            }
             $plan.Programs += [pscustomobject]@{ Vendor = $vp.Vendor; Program = $prog }
         }
-        try {
-            Get-AppxPackage -ErrorAction Stop |
-                Where-Object { $_.Name -match $vp.AppxPattern } |
-                ForEach-Object { $plan.Appx += [pscustomobject]@{ Vendor = $vp.Vendor; Package = $_ } }
+        if ($vp.AppxPattern) {
+            try {
+                Get-AppxPackage -ErrorAction Stop |
+                    Where-Object { $_.Name -match $vp.AppxPattern } |
+                    ForEach-Object { $plan.Appx += [pscustomobject]@{ Vendor = $vp.Vendor; Package = $_ } }
+            }
+            catch { }
         }
-        catch { }
 
         if ($RemoveGhostDevices) {
             $includeBattery = ($Scope -contains 'Power')
-            foreach ($g in (Get-GhostDevices -ProviderPatterns @($vp.ProviderPattern) `
+            foreach ($g in (Get-GhostDevices -Devices $ghostDevices `
+                                             -ProviderPatterns @($vp.ProviderPattern) `
                                              -ExtraHardwareIds $LaptopPhantomDeviceIds `
                                              -IncludePhantomBattery:$includeBattery)) {
                 $plan.Ghosts += [pscustomobject]@{ Vendor = $vp.Vendor; Device = $g }
@@ -1498,9 +2320,9 @@ foreach ($vp in $eligibleVendors) {
     }
 
     # Vendor scheduled tasks are startup items AND vendor residue, so they are
-    # collected under either scope. A task firing at every logon against absent
-    # hardware is the single most visible symptom of a migrated install.
-    if ($Scope -contains 'Startup' -or $vendorInScope) {
+    # collected under either scope - but only for a vendor that is eligible
+    # outright. A refused vendor's tasks are current software's tasks.
+    if ($elig.Owned -and (($Scope -contains 'Startup') -or $vendorInScope)) {
         foreach ($t in (Get-VendorScheduledTasks -VendorProfile $vp)) {
             $plan.Tasks += [pscustomobject]@{ Vendor = $vp.Vendor; Task = $t }
         }
@@ -1508,12 +2330,47 @@ foreach ($vp in $eligibleVendors) {
 }
 
 if ($Scope -contains 'Startup') {
-    $patterns = @($VendorProfiles | ForEach-Object { $_.ProviderPattern })
+    # Vendor-match Run entries come from ELIGIBLE vendors only. With a catalogue
+    # this wide, the alternative deletes the current GPU's tray entry on a
+    # Startup run. Dead-target entries are vendor-independent and always count.
+    $patterns = @($eligibleVendors | ForEach-Object { $_.ProviderPattern })
     foreach ($r in (Get-DeadRunEntries -VendorPatterns $patterns)) {
         $plan.RunKeys += $r
     }
     foreach ($a in (Get-OrphanStartupApprovals)) {
         $plan.Approvals += $a
+    }
+}
+
+# Platform: the previous builds' bus-enumerated hardware. Planned only when it
+# can be acted on, so that a census without -RemoveGhostDevices does not report
+# reclaimable work it will not do; the count is still shown in the census.
+$platformGhostCount = 0
+if ($Scope -contains 'Platform') {
+    $platformGhosts     = @(Get-PlatformGhostDevices -Devices $ghostDevices)
+    $platformGhostCount = $platformGhosts.Count
+    if ($RemoveGhostDevices) {
+        foreach ($g in $platformGhosts) {
+            $plan.Ghosts += [pscustomobject]@{ Vendor = 'Platform'; Device = $g }
+        }
+    }
+}
+
+# OtherVendors: providers with no profile and nothing bound. Always computed for
+# the census; planned only when the bucket is named explicitly.
+$otherCandidates = @(Get-OtherVendorCandidates -Packages $allPackages -LiveNames $liveNames)
+if ($Scope -contains 'OtherVendors') {
+    foreach ($c in $otherCandidates) {
+        foreach ($pkg in $c.Packages) {
+            $plan.Packages += [pscustomobject]@{ Vendor = "Other:$($c.Provider)"; Bucket = 'OtherVendors'; Package = $pkg }
+        }
+        if ($RemoveGhostDevices) {
+            $pat = '^' + [regex]::Escape($c.Provider)
+            foreach ($g in (Get-GhostDevices -Devices $ghostDevices -ProviderPatterns @($pat) `
+                                             -ExtraHardwareIds @() -BusPrefixes $PlatformGhostBusPrefixes)) {
+                $plan.Ghosts += [pscustomobject]@{ Vendor = "Other:$($c.Provider)"; Device = $g }
+            }
+        }
     }
 }
 
@@ -1658,6 +2515,24 @@ if ($plan.RegKeys.Count -gt 0) {
     $note = if ($RemoveResidualRegistry) { '' } else { '  (not removed - pass -RemoveResidualRegistry)' }
     Write-Log ("Residual registry keys: {0}{1}" -f $plan.RegKeys.Count, $note)
     foreach ($e in $plan.RegKeys) { Write-Log ("      {0}" -f $e.Key) }
+}
+
+if ($Scope -contains 'Platform' -and -not $RemoveGhostDevices -and $platformGhostCount -gt 0) {
+    Write-Log ("Platform phantom devices: {0} not-present bus-enumerated devnode(s). Pass -RemoveGhostDevices to remove them." -f $platformGhostCount) 'WARN'
+}
+
+if ($otherCandidates.Count -gt 0) {
+    $named = ($Scope -contains 'OtherVendors')
+    $note  = if ($named) { '  (planned under the OtherVendors bucket above)' } else { '  (report only - name -Scope OtherVendors to remove)' }
+    Write-Log ("Providers outside the catalogue with ZERO live bindings: {0}{1}" -f $otherCandidates.Count, $note)
+    foreach ($c in ($otherCandidates | Sort-Object Provider)) {
+        Write-Log ("      {0,-42} {1} package(s), {2} in platform classes" -f $c.Provider, $c.Total, $c.Packages.Count)
+        if (-not $named) {
+            foreach ($p in ($c.Packages | Sort-Object Original)) {
+                Write-Log ("          {0,-10} {1,-40} [{2}]" -f $p.Published, $p.Original, $p.Class)
+            }
+        }
+    }
 }
 
 Write-Log ''

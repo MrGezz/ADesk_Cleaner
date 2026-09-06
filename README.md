@@ -87,6 +87,8 @@ when it finishes, leaving only the transcript in `%TEMP%` to read.
 | Task Manager says `Update.exe` runs at startup and you have no idea whose it is | `Clean-StartupApps.ps1` — resolves it to the owning application and says what disabling it costs |
 | Sign-in is slow and you want to know what is actually starting | `Clean-StartupApps.ps1` — one census across Run keys, Startup folders, packaged apps and logon tasks |
 | Turn off every launcher, updater and tray icon in one go | `Clean-StartupApps.ps1 -DisableOptional` — never touches the entries it classifies KEEP |
+| Get them out of the list entirely, not just greyed out | `Clean-StartupApps.ps1 -RemoveOptional` — deletes the value or shortcut; `-Restore` rebuilds it exactly |
+| Why is Windows Terminal (or Phone Link, or Teams) in Task Manager's startup list? | Its own app manifest declares a `StartupTask`. `Clean-StartupApps.ps1` says so per entry; such rows can be disabled but never removed |
 | A startup entry points at a program you already uninstalled | `Clean-StartupApps.ps1 -RemoveOrphans` |
 | Put the startup list back exactly as it was | `Clean-StartupApps.ps1 -Restore <backup.json>` |
 | Stop Windows Update swapping your GPU or audio driver for an older one | `Remove-WindowsBloat.ps1 -Tweak ExcludeDriversFromWindowsUpdate` |
@@ -1777,16 +1779,47 @@ Evidence on the machine overrides the catalogue: a missing target always wins, a
 unsigned binary. That is why a known-good entry like Internet Download Manager still comes back
 `REVIEW` — its binary genuinely is not signed.
 
-### Disable rather than remove
+### Disable, or actually remove
 
 `-Disable` writes the same `StartupApproved` bytes Task Manager writes, so the entry stays in
-the list and can be turned back on. `-Remove` deletes the registry value or the shortcut and is
-only applied to entries you name explicitly, or to orphans via `-RemoveOrphans`. Packaged apps
-cannot be deleted at all — they are disabled instead, and the run says so.
+the list, greyed out, and can be turned back on.
 
-Every change is captured to a backup JSON first, and `-Restore` puts it all back. A deleted
-Startup-folder shortcut is the one thing that cannot be rebuilt automatically; the restore
-reports its original target so you can recreate it.
+`-Remove` deletes it properly: the registry value goes, the Startup-folder shortcut goes, and
+the row disappears from Task Manager. `-RemoveOptional` does that to every `OPTIONAL` entry at
+once. `KEEP`, `REVIEW` and `TRANSIENT` entries are left alone, and packaged apps are disabled
+instead, because they cannot be deleted.
+
+**Removal is fully reversible.** Before anything is deleted the run captures a shortcut's
+complete specification -- target, arguments, working directory, icon location, window style and
+description -- rather than merely its path, so `-Restore` rebuilds it exactly. Verified by
+round-trip: a probe shortcut carrying six non-default properties was removed and restored with
+all six identical. A Startup-folder item that is *not* a `.lnk` (a `.bat` or a `.vbs`) cannot be
+described that way, so the file itself is copied into a `<backup>.files` folder beside the JSON
+and copied back on restore.
+
+### The launcher asks, rather than assuming
+
+`Clean-StartupApps.cmd` has two ways in. **With arguments** it is a plain
+launcher and forwards them unchanged, so every command in this section works
+through it. **With no arguments** it opens a menu: pick the action, answer a
+couple of questions, read a summary of exactly what is about to run, and
+confirm — or go back and choose again.
+
+```
+  [1] Census only - list everything, change nothing
+  [2] Disable entries I name - they stay in the list, greyed out
+  [3] Disable every OPTIONAL entry
+  [4] REMOVE every OPTIONAL entry
+  [5] Remove ORPHAN entries
+  [6] Restore from a backup file - undo an earlier run
+```
+
+It then asks whether to include logon scheduled tasks, whether to preview
+first (`-WhatIf`, and it does not offer this for a census, where it would mean
+nothing), and whether to run elevated. The summary prints the exact command
+line it is about to use, so the menu teaches the flags rather than hiding them.
+Elevation is offered rather than forced, and runs in its own window with
+`-NoExit` so the results stay readable.
 
 ### Elevation
 
@@ -1804,6 +1837,10 @@ rights, and the run says plainly which rows it could not touch.
 
 # See exactly what a "disable everything optional" run would do:
 .\Clean-StartupApps.ps1 -DisableOptional -WhatIf
+
+# Actually DELETE every launcher, updater and tray icon, rather than leaving a
+# disabled row behind. Reversible from the backup it writes first:
+.\Clean-StartupApps.ps1 -RemoveOptional
 
 # Delete the entries whose targets are already gone:
 .\Clean-StartupApps.ps1 -RemoveOrphans

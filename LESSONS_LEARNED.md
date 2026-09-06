@@ -349,6 +349,46 @@ Appx package on the machine.
 
 ---
 
+## F2. cmd.exe traps in the launchers
+
+- **`CMDCMDLINE` is a DYNAMIC variable, and substring substitution does not
+  work on one.** cmd synthesises `CMDCMDLINE`, `CD`, `DATE`, `TIME`, `RANDOM`
+  and `ERRORLEVEL` on read rather than storing them in the environment block.
+  Plain reads work either way — `%cmdcmdline%` and `!cmdcmdline!` both print
+  the right thing — but the `:str1=str2` transform is only applied to variables
+  that are really in the block, so `!cmdcmdline:/c=!` silently returns the
+  value **unmodified**. Every launcher used
+
+  ```cmd
+  if not "!cmdcmdline:/c=!"=="!cmdcmdline!" pause
+  ```
+
+  to pause only when started from Explorer. The two sides always compared
+  equal, so **the pause never fired in any of the twelve launchers** — a window
+  opened, did its work and vanished. Copy the value into a real variable first,
+  and keep delayed expansion for the comparison so an `&` or a quote in the
+  launch path cannot be parsed as a command:
+
+  ```cmd
+  set "LAUNCHLINE=%cmdcmdline%"
+  setlocal EnableDelayedExpansion
+  if not "!LAUNCHLINE:/c=!"=="!LAUNCHLINE!" pause
+  ```
+
+  The lesson generalises: a construct that *silently does nothing* passes every
+  smoke test. Nothing errored, the exit code was right, and the only symptom
+  was a window closing — which reads as normal.
+- **`if errorlevel N` means N OR HIGHER**, so tests after a `choice` must run in
+  DESCENDING order or `3` also satisfies the test for `2`.
+- **A successful `set` resets ERRORLEVEL to 0**, so branch on a `choice` result
+  BEFORE the first assignment. Seeding a default and overriding it looks tidier
+  and sends every selection down the first branch.
+- **`%VAR%` is substituted when a block is PARSED**, before the block has run.
+  Inside `( )` that silently uses the value from before the block. Use `!VAR!`
+  and keep control flow flat with labels.
+
+---
+
 ## G. The meta-lesson: drift between sibling scripts
 
 These scripts deliberately ship as **standalone files** with no shared module, so
@@ -399,6 +439,7 @@ line is a bug that already happened once.
 | 23 | Every tweak carries an explicit `MinBuild`/`MaxBuild` so a Windows 10 value never fires on Windows 11 and vice versa | Remove-WindowsBloat |
 | 24 | Two tweaks never write the same registry value to different data; if they do, selection resolves the conflict out loud | Remove-WindowsBloat |
 | 25 | An entry classified KEEP is refused even when named explicitly | Clean-StartupApps |
+| 26 | The Explorer-pause test reads `CMDCMDLINE` through a real variable, never `!cmdcmdline:...!` directly — substring substitution does not apply to a dynamic variable | all 12 `.cmd` launchers |
 
 ### Known outstanding drift
 

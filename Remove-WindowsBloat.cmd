@@ -39,7 +39,15 @@ set "RC=%ERRORLEVEL%"
 :: than typed at a prompt. Built-in substitution rather than find.exe, so it
 :: cannot be hijacked by a Unix find earlier on PATH; delayed expansion keeps
 :: any "&" or quotes in the launch path from being parsed as commands.
+:: CMDCMDLINE is a DYNAMIC variable: cmd synthesises it rather than
+:: keeping it in the environment block, so the substring transform
+:: !cmdcmdline:/c=! returns the value UNMODIFIED and the comparison was
+:: always equal - this pause never fired in any launcher. Copy it into a
+:: real variable first, which the transform does apply to. Delayed
+:: expansion is still used for the comparison so an "&" or a quote in the
+:: launch path cannot be parsed as a command.
+set "LAUNCHLINE=%cmdcmdline%"
 setlocal EnableDelayedExpansion
-if not "!cmdcmdline:/c=!"=="!cmdcmdline!" pause
+if not "!LAUNCHLINE:/c=!"=="!LAUNCHLINE!" pause
 
 exit /b %RC%

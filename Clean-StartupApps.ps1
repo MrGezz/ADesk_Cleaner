@@ -36,6 +36,9 @@
                 Worth a look before you decide.
       ORPHAN    The target no longer exists. The entry does nothing but slow
                 sign-in. Safe to remove.
+      TRANSIENT A RunOnce entry. Windows deletes it itself the first time it
+                runs, and it is usually an installer finishing its work. It is
+                reported, but never swept in bulk.
 
     Shape matches the rest of this repository:
 
@@ -70,6 +73,16 @@
     Disable every entry whose verdict is OPTIONAL. KEEP entries are untouched.
     REVIEW entries are untouched: they need a human.
 
+.PARAMETER RemoveOptional
+    DELETE every entry whose verdict is OPTIONAL, rather than just disabling
+    it: the registry value goes, the Startup-folder shortcut goes. KEEP and
+    REVIEW entries are untouched. Everything removed is captured to the backup
+    first, including a shortcut's full target, arguments, working directory,
+    icon and window style, so -Restore rebuilds it exactly.
+
+    Packaged apps are the exception and cannot be deleted at all - they are
+    disabled instead, and the run says so per entry.
+
 .PARAMETER RemoveOrphans
     Delete every entry whose target no longer exists.
 
@@ -103,6 +116,11 @@
     Show exactly what a "disable everything optional" run would change.
 
 .EXAMPLE
+    .\Clean-StartupApps.ps1 -RemoveOptional
+    Actually delete every launcher, updater and tray icon, rather than leaving
+    a disabled row behind. Reversible from the backup.
+
+.EXAMPLE
     .\Clean-StartupApps.ps1 -RemoveOrphans
     Delete the startup entries whose targets are already gone.
 
@@ -131,6 +149,7 @@ param(
     [string[]]$Enable,
     [string[]]$Remove,
     [switch]$DisableOptional,
+    [switch]$RemoveOptional,
     [switch]$RemoveOrphans,
     [switch]$IncludeScheduledTasks,
     [string]$Restore,
@@ -160,7 +179,7 @@ $Enable  = @(ConvertTo-List $Enable)
 $Remove  = @(ConvertTo-List $Remove)
 
 $WantsChange = ($Disable.Count -or $Enable.Count -or $Remove.Count -or
-                $DisableOptional -or $RemoveOrphans -or $Restore)
+                $DisableOptional -or $RemoveOptional -or $RemoveOrphans -or $Restore)
 if (-not $WantsChange) { $ListOnly = $true }
 
 # --- Paths ----------------------------------------------------------------
@@ -553,6 +572,14 @@ function Resolve-Identity {
 # The evidence on this machine can override the catalogue's default verdict.
 function Resolve-Verdict {
     param($Entry)
+    # RunOnce is self-deleting by definition: Windows removes the value as it
+    # runs it. These are almost always an installer finishing its work (Edge's
+    # msedge_cleanup_{GUID} pair, for one), so sweeping them in bulk is at best
+    # pointless and at worst deletes pending work. Report, never bulk-remove.
+    if ($Entry.Key -like '*RunOnce*') {
+        return @('Transient', 'a RunOnce entry - Windows deletes it itself once it has run')
+    }
+
     # A packaged (Store/MSIX) startup task has no filesystem target by design -
     # Windows starts it through the app model, not a command line. Judging it on
     # a missing path would mark every Store app REVIEW.
@@ -619,6 +646,7 @@ function Get-RunEntries {
             $out += [pscustomobject]@{
                 Surface   = "$($r.Hive) $(if ($r.Key -like '*RunOnce') { 'RunOnce' } elseif ($r.Key -like '*WOW6432Node*') { 'Run (32-bit)' } else { 'Run' })"
                 Kind      = 'Run'
+                Shortcut  = $null
                 Name      = $prop.Name
                 Command   = $cmd
                 Target    = $target
@@ -650,12 +678,23 @@ function Get-FolderEntries {
         if (-not (Test-PathSafe $f.Path)) { continue }
         foreach ($file in (Get-ChildItem -LiteralPath $f.Path -File -ErrorAction SilentlyContinue)) {
             if ($file.Name -eq 'desktop.ini') { continue }
-            $cmd = ''; $target = ''
+            $cmd = ''; $target = ''; $shortcut = $null
             if ($file.Extension -eq '.lnk' -and $shell) {
                 try {
                     $sc = $shell.CreateShortcut($file.FullName)
                     $target = [string]$sc.TargetPath
                     $cmd = if ($sc.Arguments) { "`"$target`" $($sc.Arguments)" } else { $target }
+                    # Capture EVERY property, not just the target: a shortcut
+                    # deleted without these cannot be rebuilt, and -Remove is
+                    # only honest if -Restore can undo it.
+                    $shortcut = [pscustomobject]@{
+                        TargetPath       = [string]$sc.TargetPath
+                        Arguments        = [string]$sc.Arguments
+                        WorkingDirectory = [string]$sc.WorkingDirectory
+                        IconLocation     = [string]$sc.IconLocation
+                        WindowStyle      = [int]$sc.WindowStyle
+                        Description      = [string]$sc.Description
+                    }
                 }
                 catch { }
             }
@@ -665,6 +704,7 @@ function Get-FolderEntries {
             $out += [pscustomobject]@{
                 Surface   = $f.Label
                 Kind      = 'Folder'
+                Shortcut  = $shortcut
                 Name      = $file.Name
                 Command   = $cmd
                 Target    = $target
@@ -731,6 +771,7 @@ function Get-PackagedEntries {
             $out += [pscustomobject]@{
                 Surface   = 'Packaged app (StartupTask)'
                 Kind      = 'Package'
+                Shortcut  = $null
                 Name      = $ident.App
                 Command   = "$family :: $($task.PSChildName)"
                 Target    = ''
@@ -772,6 +813,7 @@ function Get-LogonTaskEntries {
         $out += [pscustomobject]@{
             Surface   = 'Scheduled task (at logon)'
             Kind      = 'Task'
+            Shortcut  = $null
             Name      = $t.TaskName
             Command   = $exe
             Target    = $target
@@ -893,7 +935,17 @@ function Remove-Entry {
             }
             'Folder' {
                 $file = Join-Path $Entry.Key $Entry.Name
-                Add-BackupEntry $Entry 'shortcut' $Entry.Command
+                if ($Entry.Shortcut) {
+                    Add-BackupEntry $Entry 'shortcut' $Entry.Shortcut
+                }
+                else {
+                    # Not a .lnk (a .bat, .vbs or a stray .exe). It cannot be
+                    # described, so keep the file itself beside the backup.
+                    $vault = "$BackupPath.files"
+                    if (-not (Test-PathSafe $vault)) { New-Item -ItemType Directory -Path $vault -Force | Out-Null }
+                    Copy-Item -LiteralPath $file -Destination (Join-Path $vault $Entry.Name) -Force
+                    Add-BackupEntry $Entry 'file' (Join-Path $vault $Entry.Name)
+                }
                 Remove-Item -LiteralPath $file -Force
             }
             'Task' {
@@ -940,7 +992,30 @@ function Restore-FromBackup {
                     Set-ItemProperty -LiteralPath "$($r.Hive):\$($r.Key)" -Name $r.Name -Value $r.Before -Force
                 }
                 'shortcut' {
-                    Write-Log "  MANUAL $($r.Name): a deleted shortcut cannot be rebuilt; its target was '$($r.Before)'." 'WARN'
+                    $dest = Join-Path $r.Key $r.Name
+                    if ($r.Before -is [string]) {
+                        Write-Log "  MANUAL $($r.Name): this backup predates full shortcut capture; its target was '$($r.Before)'." 'WARN'
+                    }
+                    else {
+                        $sh = New-Object -ComObject WScript.Shell
+                        $lnk = $sh.CreateShortcut($dest)
+                        $lnk.TargetPath = [string]$r.Before.TargetPath
+                        if ($r.Before.Arguments)        { $lnk.Arguments        = [string]$r.Before.Arguments }
+                        if ($r.Before.WorkingDirectory) { $lnk.WorkingDirectory = [string]$r.Before.WorkingDirectory }
+                        if ($r.Before.IconLocation)     { $lnk.IconLocation     = [string]$r.Before.IconLocation }
+                        if ($r.Before.Description)      { $lnk.Description      = [string]$r.Before.Description }
+                        if ($null -ne $r.Before.WindowStyle) { $lnk.WindowStyle = [int]$r.Before.WindowStyle }
+                        $lnk.Save()
+                    }
+                }
+                'file' {
+                    $dest = Join-Path $r.Key $r.Name
+                    if (Test-PathSafe $r.Before) {
+                        Copy-Item -LiteralPath $r.Before -Destination $dest -Force
+                    }
+                    else {
+                        Write-Log "  MANUAL $($r.Name): the saved copy at '$($r.Before)' is gone." 'WARN'
+                    }
                 }
                 'task' {
                     if ([string]$r.Before -eq 'Enabled') { Enable-ScheduledTask -TaskName $r.Name -TaskPath $r.Key | Out-Null }
@@ -987,10 +1062,11 @@ foreach ($grp in ($entries | Group-Object Surface | Sort-Object Name)) {
     Write-Log "--- $($grp.Name) ---" 'HEAD'
     foreach ($e in ($grp.Group | Sort-Object Name)) {
         $flag = switch ($e.Verdict) {
-            'Keep'     { 'OK' }
-            'Orphan'   { 'WARN' }
-            'Review'   { 'WARN' }
-            default    { 'INFO' }
+            'Keep'      { 'OK' }
+            'Orphan'    { 'WARN' }
+            'Review'    { 'WARN' }
+            'Transient' { 'INFO' }
+            default     { 'INFO' }
         }
         Write-Log ("{0}  [{1}] {2}" -f $e.Name.PadRight(34), $e.Verdict.ToUpper(), $e.State) $flag
         if ($e.Identity.App -and $e.Identity.App -ne $e.Name) {
@@ -1000,6 +1076,13 @@ foreach ($grp in ($entries | Group-Object Surface | Sort-Object Name)) {
         if ($e.Target) { Write-Log "        runs    : $($e.Target)" }
         if ($e.Facts.Company) { Write-Log "        by      : $($e.Facts.Company)  (signature: $($e.Facts.Signed))" }
         Write-Log "        cost    : $($e.Identity.Cost)"
+        if ($e.Kind -eq 'Package') {
+            # This is the single most-asked question about the list: why is
+            # Windows Terminal in it when nothing is running? Because the app's
+            # own AppxManifest declares a StartupTask, so Windows lists the
+            # OFFER whether or not it is switched on.
+            Write-Log "        listed  : its own app manifest declares this StartupTask, so Windows lists it whether or not it is on. It cannot be removed - only disabled - and it leaves this list only when the app is uninstalled."
+        }
         Write-Log "        verdict : $($e.Verdict) - $($e.Why)"
     }
 }
@@ -1028,7 +1111,7 @@ function Select-Entries {
 
 if ($ListOnly) {
     Write-Section 'SUMMARY'
-    foreach ($v in @('Keep', 'Optional', 'Review', 'Orphan')) {
+    foreach ($v in @('Keep', 'Optional', 'Review', 'Orphan', 'Transient')) {
         $c = @($entries | Where-Object { $_.Verdict -eq $v }).Count
         if ($c) { Write-Log "$($v.PadRight(9)): $c" }
     }
@@ -1038,6 +1121,8 @@ if ($ListOnly) {
     if ($optional.Count) {
         Write-Log "$($optional.Count) OPTIONAL entries are still enabled. To turn them all off:" 'HEAD'
         Write-Log "    .\Clean-StartupApps.ps1 -DisableOptional"
+        Write-Log "  or to DELETE them outright rather than leave a disabled row behind:"
+        Write-Log "    .\Clean-StartupApps.ps1 -RemoveOptional"
         Write-Log "  or pick them off individually, e.g.:"
         Write-Log "    .\Clean-StartupApps.ps1 -Disable $((($optional | Select-Object -First 3).Identity.App) -join ',')"
     }
@@ -1059,6 +1144,13 @@ if ($Enable.Count)  { $toEnable  += Select-Entries $Enable }
 if ($Remove.Count)  { $toRemove  += Select-Entries $Remove }
 if ($DisableOptional) {
     $toDisable += @($entries | Where-Object { $_.Verdict -eq 'Optional' -and $_.State -eq 'Enabled' })
+}
+if ($RemoveOptional) {
+    # Deleting a packaged app's task is impossible, so route those to the
+    # disable list instead of pretending they were removed.
+    $opt = @($entries | Where-Object { $_.Verdict -eq 'Optional' })
+    $toRemove  += @($opt | Where-Object { $_.Kind -ne 'Package' })
+    $toDisable += @($opt | Where-Object { $_.Kind -eq 'Package' -and $_.State -ne 'Disabled' })
 }
 if ($RemoveOrphans) {
     $toRemove += @($entries | Where-Object { $_.Verdict -eq 'Orphan' })

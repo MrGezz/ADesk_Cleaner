@@ -529,7 +529,7 @@ $Catalogue = @(
         (New-Op HKLM $EDGEPOL 'UserFeedbackAllowed' 'DWord' 0),
         (New-Op HKLM $EDGEPOL 'ShowRecommendationsEnabled' 'DWord' 0),
         (New-Op HKLM $EDGEPOL 'WalletDonationEnabled' 'DWord' 0),
-        (New-Op HKLM $EDGEPOL 'HideFirstRunExperience' 'DWord' 0),
+        (New-Op HKLM $EDGEPOL 'HideFirstRunExperience' 'DWord' 1),
         (New-Op HKLM $EDGEPOL 'DefaultBrowserSettingEnabled' 'DWord' 0),
         (New-Op HKLM $EDGEPOL 'DefaultBrowserSettingsCampaignEnabled' 'DWord' 0),
         (New-Op HKLM $EDGEPOL 'SpotlightExperiencesAndRecommendationsEnabled' 'DWord' 0),
@@ -667,7 +667,7 @@ $Catalogue = @(
         -Title 'Show hidden files, folders and drives' -Ops @((New-Op HKCU $ADV 'Hidden' 'DWord' 1))),
     (New-Tweak -Id 'ExplorerToThisPC' -Group 'Explorer' `
         -Title 'Open File Explorer to This PC' -Ops @((New-Op HKCU $ADV 'LaunchTo' 'DWord' 1))),
-    (New-Tweak -Id 'HideHome' -Group 'Explorer' -MinBuild 22000 `
+    (New-Tweak -Id 'HideHome' -Group 'Explorer' -MinBuild 22621 `
         -Title 'Hide Home from the Explorer navigation pane (adds a Show Home toggle to Folder Options)' -Ops @(
         (New-Op HKCU 'Software\Classes\CLSID\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}' '' 'String' 'CLSID_MSGraphHomeFolder'),
         (New-Op HKCU 'Software\Classes\CLSID\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}' 'System.IsPinnedToNameSpaceTree' 'DWord' 0),
@@ -681,7 +681,7 @@ $Catalogue = @(
         (New-Op HKLM 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced\NavPane\ShowHome' 'UncheckedValue' 'DWord' 0),
         (New-Op HKLM 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced\NavPane\ShowHome' 'ValueName' 'String' 'System.IsPinnedToNameSpaceTree')
     )),
-    (New-Tweak -Id 'HideGallery' -Group 'Explorer' -MinBuild 22000 `
+    (New-Tweak -Id 'HideGallery' -Group 'Explorer' -MinBuild 22621 `
         -Title 'Hide Gallery from the Explorer navigation pane (adds a Show Gallery toggle to Folder Options)' -Ops @(
         (New-Op HKCU 'Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}' 'System.IsPinnedToNameSpaceTree' 'DWord' 0),
         (New-Op HKLM 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced\NavPane\ShowGallery' 'CheckedValue' 'DWord' 1),
@@ -700,7 +700,8 @@ $Catalogue = @(
     )),
 
     # ---- System ------------------------------------------------------------
-    (New-Tweak -Id 'DisableDragTray' -Group 'System' -Default -MinBuild 26200 `
+    (New-Tweak -Id 'DisableDragTray' -Group 'System' -MinBuild 22631 `
+        -Note 'The Drag Tray arrived in cumulative updates to 22631.5413 and 26100.4202, not in 25H2, and Microsoft removed the feature outright in KB5121003 (26100.9168 / 26200.9168). On a fully patched machine this is a dead write; it is kept, and no longer default, for machines that have not taken that update.' `
         -Title 'Disable the Drag Tray that appears when dragging files' -Ops @(
         (New-Op HKCU 'Software\Microsoft\Windows\CurrentVersion\CDP' 'DragTrayEnabled' 'DWord' 0)
     )),
@@ -710,7 +711,7 @@ $Catalogue = @(
         (New-Op HKCU 'Control Panel\Mouse' 'MouseThreshold1' 'String' '0'),
         (New-Op HKCU 'Control Panel\Mouse' 'MouseThreshold2' 'String' '0')
     )),
-    (New-Tweak -Id 'DisableStickyKeys' -Group 'System' -MinBuild 26100 `
+    (New-Tweak -Id 'DisableStickyKeys' -Group 'System' `
         -Title 'Disable the Sticky Keys shortcut (Shift five times)' -Ops @(
         (New-Op HKCU 'Control Panel\Accessibility\StickyKeys' 'Flags' 'String' '506')
     )),
@@ -718,7 +719,7 @@ $Catalogue = @(
         -Title 'Disable Fast Startup (full shutdown every time)' -Ops @(
         (New-Op HKLM 'SYSTEM\CurrentControlSet\Control\Session Manager\Power' 'HiberbootEnabled' 'DWord' 0)
     )),
-    (New-Tweak -Id 'DisableStorageSense' -Group 'System' -MinBuild 22000 `
+    (New-Tweak -Id 'DisableStorageSense' -Group 'System' `
         -Title 'Disable Storage Sense automatic cleanup' -Ops @(
         (New-Op HKCU 'SOFTWARE\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy' '01' 'DWord' 0)
     )),
@@ -787,6 +788,155 @@ $Catalogue = @(
     (New-Tweak -Id 'DisableAnimations' -Group 'Appearance' `
         -Title 'Disable animations and visual effects' -Ops @(
         (New-Op HKCU 'Control Panel\Desktop' 'UserPreferencesMask' 'Binary' ([byte[]](0x90, 0x12, 0x07, 0x80, 0x10, 0x00, 0x00, 0x00)))
+    )),
+
+    # ======================================================================
+    # Added 2026-09-06. Every entry below was researched against current
+    # Microsoft documentation and then adversarially re-verified; anything
+    # that could not be confirmed on a stated build was dropped rather than
+    # guessed. Build gates are explicit, so a Windows 10 value never fires on
+    # Windows 11 and vice versa.
+    # ======================================================================
+
+    # --- Windows 10 taskbar. None of these values exist on Windows 11, whose
+    # --- taskbar was rewritten, so every one is capped at 19045.
+    (New-Tweak -Id 'HideNewsInterests' -Group 'Taskbar' -Default -MaxBuild 19045 `
+        -Title 'Remove News and Interests from the taskbar (Windows 10)' -Ops @(
+        (New-Op HKCU 'Software\Microsoft\Windows\CurrentVersion\Feeds' 'ShellFeedsTaskbarViewMode' 'DWord' 2)
+    )),
+    (New-Tweak -Id 'HidePeopleBar' -Group 'Taskbar' -Default -MaxBuild 19045 `
+        -Title 'Remove the People bar from the taskbar (Windows 10)' -Ops @(
+        (New-Op HKCU 'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\People' 'PeopleBand' 'DWord' 0)
+    )),
+    (New-Tweak -Id 'HideCortanaButton' -Group 'Taskbar' -Default -MaxBuild 19045 `
+        -Title 'Remove the Cortana button from the taskbar (Windows 10)' -Ops @(
+        (New-Op HKCU 'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'ShowCortanaButton' 'DWord' 0)
+    )),
+    (New-Tweak -Id 'HideInkWorkspace' -Group 'Taskbar' -Default -MaxBuild 19045 `
+        -Title 'Remove the Windows Ink Workspace button (Windows 10)' -Ops @(
+        (New-Op HKCU 'Software\Microsoft\Windows\CurrentVersion\PenWorkspace' 'PenWorkspaceButtonDesiredVisibility' 'DWord' 0)
+    )),
+
+    # --- AI surfaces that arrived after the original catalogue was written.
+    (New-Tweak -Id 'HideAskCopilotContextMenu' -Group 'AI' -Default -MinBuild 22621 `
+        -Title 'Remove "Ask Copilot" from the right-click menu' -Ops @(
+        (New-Op HKCU 'Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked' '{CB3B0003-8088-4EDE-8769-8B354AB2FF8C}' 'String' '')
+    )),
+    (New-Tweak -Id 'DisableSettingsAgent' -Group 'AI' -Policy -MinBuild 26100 `
+        -Title 'Disable the AI agent in Settings (24H2 and later)' -Ops @(
+        (New-Op HKLM 'SOFTWARE\Policies\Microsoft\Windows\WindowsAI' 'DisableSettingsAgent' 'DWord' 1)
+    )),
+
+    # --- Search
+    (New-Tweak -Id 'DisableCloudSearch' -Group 'Search' -Default `
+        -Title 'Stop search from querying your Microsoft account content' -Ops @(
+        (New-Op HKCU 'Software\Microsoft\Windows\CurrentVersion\SearchSettings' 'IsMSACloudSearchEnabled' 'DWord' 0)
+    )),
+
+    # --- Explorer
+    (New-Tweak -Id 'EnableLongPaths' -Group 'Explorer' `
+        -Note 'Not a debloat step - it raises the 260-character path limit, which matters on machines holding deep Revit and Autodesk project trees. Applications must also opt in through their manifest; Explorer itself does not.' `
+        -Title 'Allow paths longer than 260 characters' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Control\FileSystem' 'LongPathsEnabled' 'DWord' 1)
+    )),
+
+    # --- System
+    (New-Tweak -Id 'DisableAutoPlay' -Group 'System' -Policy -Default `
+        -Title 'Disable AutoPlay and AutoRun on every drive type' -Ops @(
+        (New-Op HKCU 'Software\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'NoDriveTypeAutoRun' 'DWord' 255)
+    )),
+    (New-Tweak -Id 'DisableHibernate' -Group 'System' `
+        -Note 'DESTRUCTIVE ON LAPTOPS. Removes the hibernate power state and deletes hiberfil.sys, reclaiming several GB. DisableFastStartup already turns off hybrid boot WITHOUT costing you hibernate, so prefer that one unless you specifically want the disk space back. Never selected by default.' `
+        -Title 'Disable hibernation entirely and reclaim hiberfil.sys' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Control\Power' 'HibernateEnabled' 'DWord' 0)
+    )),
+
+    # --- Windows 11 shell behaviour
+    (New-Tweak -Id 'HideAltTabBrowserTabs' -Group 'Appearance' -MinBuild 22000 `
+        -Title 'Show only windows in Alt+Tab, not individual browser tabs' -Ops @(
+        (New-Op HKCU 'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'MultiTaskingAltTabFilter' 'DWord' 3)
+    )),
+    (New-Tweak -Id 'DisableSnapLayouts' -Group 'Appearance' -MinBuild 22000 `
+        -Title 'Disable the Snap Layouts flyout on the maximise button' -Ops @(
+        (New-Op HKCU 'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'EnableSnapAssistFlyout' 'DWord' 0)
+    )),
+
+    # --- Update
+    (New-Tweak -Id 'ExcludeDriversFromWindowsUpdate' -Group 'Update' -Policy `
+        -Note 'Stops Windows Update replacing GPU, audio and chipset drivers with its own older builds - the usual reason a working workstation regresses after patch Tuesday. You then own driver updates yourself.' `
+        -Title 'Keep drivers out of Windows Update quality updates' -Ops @(
+        (New-Op HKLM 'SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'ExcludeWUDriversInQualityUpdate' 'DWord' 1)
+    )),
+
+    # ======================================================================
+    # SERVICES. Writing Start=4 stops a service starting at the NEXT boot; it
+    # does not stop one that is already running, so these take effect after a
+    # restart. Each value is backed up like any other, so -Restore puts the
+    # original Start back. WaaSMedicSvc is deliberately absent: its key is
+    # owned by TrustedInstaller and it rewrites its own Start value, so
+    # "disabling" it achieves nothing except breaking Windows Update's ability
+    # to repair itself.
+    # ======================================================================
+    (New-Tweak -Id 'DisableDiagTrackSvc' -Group 'Services' -Default `
+        -Title 'Disable the Connected User Experiences and Telemetry service' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\DiagTrack' 'Start' 'DWord' 4)
+    )),
+    (New-Tweak -Id 'DisableDmwappushSvc' -Group 'Services' -Default `
+        -Title 'Disable the WAP Push routing service (a telemetry transport)' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\dmwappushservice' 'Start' 'DWord' 4)
+    )),
+    (New-Tweak -Id 'DisableRetailDemoSvc' -Group 'Services' -Default `
+        -Title 'Disable the Retail Demo service (shop-floor mode)' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\RetailDemo' 'Start' 'DWord' 4)
+    )),
+    (New-Tweak -Id 'DisableRemoteRegistrySvc' -Group 'Services' -Default `
+        -Title 'Disable the Remote Registry service' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\RemoteRegistry' 'Start' 'DWord' 4)
+    )),
+    (New-Tweak -Id 'DisableWerSvc' -Group 'Services' `
+        -Note 'Windows Error Reporting stops uploading crash dumps. Local crash logging in Event Viewer is unaffected, but some vendor support processes ask for WER data.' `
+        -Title 'Disable Windows Error Reporting' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\WerSvc' 'Start' 'DWord' 4)
+    )),
+    (New-Tweak -Id 'DisableSysMainSvc' -Group 'Services' `
+        -Note 'SysMain (SuperFetch) prefetches applications into RAM. On an SSD the benefit is small and the background I/O is real; on a mechanical disk it genuinely helps, so leave it alone there.' `
+        -Title 'Disable SysMain / SuperFetch' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\SysMain' 'Start' 'DWord' 4)
+    )),
+    (New-Tweak -Id 'DisablePcaSvc' -Group 'Services' `
+        -Note 'The Program Compatibility Assistant stops offering compatibility fixes, and stops recording which programs you run for the compatibility telemetry database.' `
+        -Title 'Disable the Program Compatibility Assistant service' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\PcaSvc' 'Start' 'DWord' 4)
+    )),
+    (New-Tweak -Id 'DisableDoSvc' -Group 'Services' `
+        -Note 'Set to MANUAL (3), not disabled: Windows Update still needs Delivery Optimization to fetch updates at all. This only stops it running permanently in the background. DisableDeliveryOptimization is the tweak that stops peer-to-peer sharing.' `
+        -Title 'Set Delivery Optimization to start on demand only' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\DoSvc' 'Start' 'DWord' 3)
+    )),
+    (New-Tweak -Id 'DisableMapsBrokerSvc' -Group 'Services' `
+        -Note 'BREAKS A FEATURE: offline maps stop downloading and updating. Harmless if you never use the Maps app.' `
+        -Title 'Disable the Downloaded Maps Manager' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\MapsBroker' 'Start' 'DWord' 4)
+    )),
+    (New-Tweak -Id 'DisableLfSvc' -Group 'Services' `
+        -Note 'BREAKS A FEATURE: the Geolocation service backs Windows location, Find My Device and the automatic time zone. DisableLocationServices turns location off through the supported setting; prefer that unless you want the service gone entirely.' `
+        -Title 'Disable the Geolocation service' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\lfsvc' 'Start' 'DWord' 4)
+    )),
+    (New-Tweak -Id 'DisableWpcMonSvc' -Group 'Services' `
+        -Note 'BREAKS A FEATURE: this is the Parental Controls monitor. If anyone on this machine is managed by Microsoft Family Safety, do not select it.' `
+        -Title 'Disable the Parental Controls service' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\WpcMonSvc' 'Start' 'DWord' 4)
+    )),
+    (New-Tweak -Id 'DisableFaxSvc' -Group 'Services' `
+        -Note 'Only relevant if a fax modem is attached, which on a 2026 workstation it is not.' `
+        -Title 'Disable the Fax service' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\Fax' 'Start' 'DWord' 4)
+    )),
+    (New-Tweak -Id 'DisableWSearchSvc' -Group 'Services' `
+        -Note 'BREAKS A MAJOR FEATURE. Windows Search indexing stops entirely: Start menu file results, Explorer search and Outlook search fall back to slow unindexed scans or stop working. Only select this if you search with Everything or a similar tool. For a search index that is merely broken, Reset-SearchIndex.ps1 in this repository is the right script.' `
+        -Title 'Disable Windows Search indexing' -Ops @(
+        (New-Op HKLM 'SYSTEM\CurrentControlSet\Services\WSearch' 'Start' 'DWord' 4)
     ))
 )
 
@@ -803,7 +953,15 @@ $TelemetryTasks = @(
     @{ Path = '\Microsoft\Windows\Customer Experience Improvement Program\'; Name = 'Consolidator' },
     @{ Path = '\Microsoft\Windows\Customer Experience Improvement Program\'; Name = 'UsbCeip' },
     @{ Path = '\Microsoft\Windows\DiskDiagnostic\';                         Name = 'Microsoft-Windows-DiskDiagnosticDataCollector' },
-    @{ Path = '\Microsoft\Windows\Autochk\';                                Name = 'Proxy' }
+    @{ Path = '\Microsoft\Windows\Autochk\';                                Name = 'Proxy' },
+    # Added 2026-09-06, each confirmed present and Ready on Windows 11 26200.
+    # DisableTelemetry already sets NumberOfSIUFInPeriod=0, but the SIUF tasks
+    # survive a rollback of that policy, so disable them as well.
+    @{ Path = '\Microsoft\Windows\Feedback\Siuf\';                        Name = 'DmClient' },
+    @{ Path = '\Microsoft\Windows\Feedback\Siuf\';                        Name = 'DmClientOnScenarioDownload' },
+    @{ Path = '\Microsoft\Windows\Windows Error Reporting\';                Name = 'QueueReporting' },
+    @{ Path = '\Microsoft\Windows\DUSM\';                                   Name = 'dusmtask' },
+    @{ Path = '\Microsoft\XblGameSave\';                                      Name = 'XblGameSaveTask' }
 )
 
 # --- The app list ---------------------------------------------------------
@@ -856,6 +1014,26 @@ $RecommendedApps = @(
     @{ Id = 'Microsoft.Office.Sway';                     Name = 'Sway' },
     @{ Id = 'Microsoft.WindowsMaps';                     Name = 'Windows Maps' },
     @{ Id = 'Microsoft.XboxApp';                         Name = 'Xbox Console Companion' },
+    # Added 2026-09-06. Discontinued, superseded or newly force-installed
+    # Microsoft apps that predate older debloater lists.
+    @{ Id = 'microsoft.windowscommunicationsapps';       Name = 'Mail, Calendar & People (end of support 2024-12-31)' },
+    @{ Id = 'Microsoft.People';                          Name = 'People' },
+    @{ Id = 'Microsoft.OutlookForWindows';               Name = 'Outlook for Windows (new)' },
+    @{ Id = 'Microsoft.M365Companions';                  Name = 'Microsoft 365 Companions' },
+    @{ Id = 'Microsoft.YourPhone';                       Name = 'Phone Link' },
+    @{ Id = 'MicrosoftWindows.CrossDevice';              Name = 'Cross Device Experience Host' },
+    @{ Id = 'Microsoft.ZuneMusic';                       Name = 'Media Player / Groove Music' },
+    @{ Id = 'Microsoft.Whiteboard';                      Name = 'Microsoft Whiteboard' },
+    @{ Id = 'Microsoft.GetHelp';                         Name = 'Get Help' },
+    # NOT listed, on purpose:
+    #   Microsoft.ScreenSketch  - on Windows 11 this package IS the Snipping
+    #                             Tool, not the retired Snip & Sketch. Removing
+    #                             it takes the screenshot tool with it.
+    #   Microsoft.Wallet        - Windows 10 Mobile only, retired 2019; it was
+    #                             never on a desktop image in the first place.
+    #   XP9CXNGPPJ97XX          - a Store product ID, not a Get-AppxPackage
+    #                             name, so it can never match here. The
+    #                             Microsoft.Copilot entry is what removes Copilot.
     # Third-party sponsored apps and games
     @{ Id = 'ACGMediaPlayer';                            Name = 'ACG Media Player' },
     @{ Id = 'ActiproSoftwareLLC';                        Name = 'Actipro Software' },
@@ -929,7 +1107,12 @@ $ProtectedApps = @(
 function Get-TweakApplicability {
     param($T)
     if ($T.MinBuild -gt 0 -and $script:Build -gt 0 -and $script:Build -lt $T.MinBuild) { return "needs build $($T.MinBuild)+" }
-    if ($T.MaxBuild -gt 0 -and $script:Build -gt 0 -and $script:Build -gt $T.MaxBuild) { return "Windows 10 only (build <= $($T.MaxBuild))" }
+    if ($T.MaxBuild -gt 0 -and $script:Build -gt 0 -and $script:Build -gt $T.MaxBuild) {
+        # Not every MaxBuild means "Windows 10 only" - HideChat caps at 22621,
+        # which is Windows 10 AND Windows 11 22H2. Say what the gate really is.
+        if ($T.MaxBuild -lt 22000) { return "Windows 10 only (build <= $($T.MaxBuild))" }
+        return "needs build <= $($T.MaxBuild)"
+    }
     if ($T.RequireKey -and -not (Test-Path -LiteralPath $T.RequireKey)) { return "key absent: $($T.RequireKey)" }
     return ''
 }
@@ -1211,6 +1394,16 @@ foreach ($g in $Group) {
 }
 $selectedIds = @($selectedIds | Where-Object { $SkipTweak -inotcontains $_ })
 
+# HideSearchTb and ShowSearchIconTb write the SAME value
+# (Search\SearchboxTaskbarMode) to different numbers, so asking for -Group
+# Taskbar selects both and whichever runs second silently undoes the first.
+# Hiding wins, because it is the more specific request; ask for
+# -Tweak ShowSearchIconTb on its own to get the icon instead.
+if (($selectedIds -contains 'HideSearchTb') -and ($selectedIds -contains 'ShowSearchIconTb')) {
+    $selectedIds = @($selectedIds | Where-Object { $_ -ne 'ShowSearchIconTb' })
+    Write-Log 'HideSearchTb and ShowSearchIconTb both set SearchboxTaskbarMode. Keeping HideSearchTb; dropping ShowSearchIconTb.' 'WARN'
+}
+
 # Apps
 $appList = @()
 if ($RemoveApps) {
@@ -1237,6 +1430,15 @@ if ($IncludeOneDrive) { $wingetList += 'Microsoft.OneDrive' }
 #  CENSUS
 # ==========================================================================
 
+# A tweak's -Note says what it costs you. The catalogue has carried notes
+# from the start but nothing ever printed them, and a warning nobody sees is
+# not a warning.
+function Write-TweakNote {
+    param($T, [bool]$Selected)
+    if (-not $T.Note) { return }
+    Write-Log ("        note: {0}" -f $T.Note) $(if ($Selected) { 'WARN' } else { 'INFO' })
+}
+
 Write-Section 'TWEAKS'
 $plan = @()          # tweaks to apply
 $applied = 0; $na = 0
@@ -1253,11 +1455,13 @@ foreach ($t in $Catalogue) {
     $state = Get-TweakState $t
     if ($state.Applied) {
         Write-Log ("  {0} {1,-30} APPLIED  {2}{3}" -f $mark, $t.Id, $t.Title, $tag) $(if ($sel) { 'OK' } else { 'INFO' })
+        Write-TweakNote $t $sel
         if ($sel) { $applied++ }
     }
     else {
         $lvl = if (-not $sel) { 'INFO' } elseif ($t.Policy) { 'POLICY' } else { 'WARN' }
         Write-Log ("  {0} {1,-30} PENDING  {2}{3}" -f $mark, $t.Id, $t.Title, $tag) $lvl
+        Write-TweakNote $t $sel
         if ($sel) {
             foreach ($p in $state.Pending) { Write-Log ("        {0}" -f $p) }
             $plan += $t

@@ -3,7 +3,8 @@
 Eight PowerShell uninstallers for Windows — four for Autodesk environments, one for Fortinet
 FortiClient, one for Adobe Creative Cloud, one for every previous build's driver stack on a
 Windows install that moves from machine to machine, one for Windows' own bloat — plus a Revit
-cache cleaner, a Windows Search index reset, and a small general-purpose cleanup utility. Each
+cache cleaner, a Windows Search index reset, a startup-app auditor, and a small
+general-purpose cleanup utility. Each
 uninstaller targets a different layer of the stack, and each is registry-driven, preview-first,
 and fully logged.
 
@@ -17,6 +18,7 @@ and fully logged.
 | [`Uninstall-Adobe.ps1`](Uninstall-Adobe.ps1) | **Adobe Creative Cloud products you select** — Photoshop, Illustrator, Acrobat and the rest, by SAP code or name, via Adobe's own HyperDrive uninstaller. **Preserves shared runtimes** other Adobe apps still reference | Required (self-elevates) |
 | [`Remove-LegacyHardwareResidue.ps1`](Remove-LegacyHardwareResidue.ps1) | **Every previous build's platform stack**, on a Windows install that moves from machine to machine — a catalogue of ASUS, Intel, AMD, NVIDIA, Gigabyte, MSI, ASRock, the laptop OEMs and their component vendors: driver packages, services, scheduled tasks, phantom devnodes and folders; plus the phantom PCI/ACPI/disk/monitor devnodes of old builds, and a discovery pass for vendors it has no profile for. **Refuses, per bucket, any vendor whose hardware is still present** | Required (self-elevates; `-ListOnly` does not) |
 | [`Remove-WindowsBloat.ps1`](Remove-WindowsBloat.ps1) | **Windows' own bloat** — the pre-installed Store apps, telemetry, tips and ads, Copilot / Recall / Click To Do, Bing in search, Widgets — as a census-first run that **backs up every registry value it changes** and puts them all back with `-Restore` | Required (self-elevates; `-ListOnly` does not) |
+| [`Clean-StartupApps.ps1`](Clean-StartupApps.ps1) | Not an uninstaller — audits **everything that launches itself at sign-in** across all four mechanisms (Run keys, Startup folders, packaged `StartupTask`s, logon scheduled tasks) and, for each one, says **what it actually is**. Resolves `Update.exe` to the app that owns it, `.lnk` files to their targets, and package task ids to their apps; then disables, removes or restores them | Optional (per-user surfaces need none; machine-wide ones do) |
 | [`Clear-RevitCache.ps1`](Clear-RevitCache.ps1) | Not an uninstaller — **keeps Revit installed** and clears its per-user caches: accelerator cache, web caches, journal history, and (opt-in) the cloud collaboration cache and the Home screen's Recent models page | None |
 | [`Reset-SearchIndex.ps1`](Reset-SearchIndex.ps1) | Not an uninstaller — resets and rebuilds the **Windows Search** index, and lifts the self-throttling that otherwise makes the rebuild take days. Writes one owner-locked registry key that not even SYSTEM can write, then **restores its original ACL and owner** | Required (self-elevates; `-Status` and `-Analyze` do not) |
 | [`Clean-Directory.ps1`](Clean-Directory.ps1) | Not an uninstaller — a recursive sweep for build junk (`*.bak`, `__pycache__`) under a directory you name | None |
@@ -82,6 +84,14 @@ when it finishes, leaving only the transcript in `%TEMP%` to read.
 | `SearchIndexer.exe` competing for CPU and disk long after the rebuild finished | `Reset-SearchIndex.ps1 -RevertTurbo` — turbo was left on |
 | A reset was interrupted and Windows Search is now stopped or disabled | `Reset-SearchIndex.ps1 -Repair` — restarts the service without touching the index |
 | `DisableBackOff` cannot be written even from an elevated prompt | `Reset-SearchIndex.ps1 -TakeOwnership` — on Windows 11 23H2+ the key is owner-locked to `NT SERVICE\WSearch`; the script restores the original ACL afterwards |
+| Task Manager says `Update.exe` runs at startup and you have no idea whose it is | `Clean-StartupApps.ps1` — resolves it to the owning application and says what disabling it costs |
+| Sign-in is slow and you want to know what is actually starting | `Clean-StartupApps.ps1` — one census across Run keys, Startup folders, packaged apps and logon tasks |
+| Turn off every launcher, updater and tray icon in one go | `Clean-StartupApps.ps1 -DisableOptional` — never touches the entries it classifies KEEP |
+| A startup entry points at a program you already uninstalled | `Clean-StartupApps.ps1 -RemoveOrphans` |
+| Put the startup list back exactly as it was | `Clean-StartupApps.ps1 -Restore <backup.json>` |
+| Stop Windows Update swapping your GPU or audio driver for an older one | `Remove-WindowsBloat.ps1 -Tweak ExcludeDriversFromWindowsUpdate` |
+| Turn off the telemetry, WAP-push and retail-demo services as well as the policies | `Remove-WindowsBloat.ps1 -Group Services` — every entry is backed up and reversible |
+| Windows 10 taskbar clutter: News and Interests, People bar, Cortana button, Ink Workspace | `Remove-WindowsBloat.ps1 -Group Taskbar` — those four entries are capped at build 19045, so they never fire on Windows 11 |
 | A fresh Windows full of Candy Crush, the Bing apps, Copilot, Widgets, tips and telemetry | `Remove-WindowsBloat.ps1 -ListOnly` first, then without it |
 | Undo a debloat | `Remove-WindowsBloat.ps1 -Restore <backup.json>` — every registry value goes back exactly as captured; apps come back from the Store |
 | "Some settings are managed by your organization" after a debloat | Those are the tweaks the census tags `[POLICY]`; `-Restore` removes them |
@@ -116,6 +126,10 @@ The three Autodesk uninstallers, `Uninstall-FortiClient.ps1`, `Uninstall-Adobe.p
 | `3` | Partial failure — one or more products did not uninstall |
 | `2` | Nothing matched; no changes made |
 | `1` | Aborted (target application running, elevation cancelled, invalid `-LogPath`) |
+
+`Clean-StartupApps.ps1` shares the same contract, with `2` meaning every selected startup
+entry was already in the state you asked for, and `1` meaning a name you passed matched
+nothing.
 
 A run in which you **declined** products at the prompts also exits `0` — declining is a
 deliberate choice, not a failure, so it does not earn exit `3`. Such a run says so explicitly
@@ -1581,6 +1595,70 @@ update anyway), **Windows Terminal** (it may be the window you are in) and the a
 Xbox app and the Game Bar overlays are removed only with `-IncludeGamingApps`, because some PC
 games need them to launch.
 
+### The 2026 catalogue refresh
+
+The catalogue was re-researched on 2026-09-06 against current Microsoft
+documentation and then adversarially re-verified, entry by entry; seven proposals
+were rejected as duplicates, misidentified packages or unverifiable keys rather
+than shipped on a guess. What changed:
+
+**26 new tweaks**, all build-gated:
+
+* **Windows 10 taskbar** (capped at build 19045, so they never fire on Windows 11):
+  `HideNewsInterests`, `HidePeopleBar`, `HideCortanaButton`, `HideInkWorkspace`.
+* **AI surfaces added since the original catalogue**: `HideAskCopilotContextMenu`
+  (22621+), `DisableSettingsAgent` (24H2+).
+* **Search / Explorer / system**: `DisableCloudSearch`, `EnableLongPaths`,
+  `DisableAutoPlay`, `DisableHibernate`, `HideAltTabBrowserTabs`,
+  `DisableSnapLayouts`, `ExcludeDriversFromWindowsUpdate`.
+* **A new `Services` group** — 13 entries that set a service's `Start` value:
+  `DiagTrack`, `dmwappushservice`, `RetailDemo`, `RemoteRegistry`, `WerSvc`,
+  `SysMain`, `PcaSvc`, `DoSvc`, `MapsBroker`, `lfsvc`, `WpcMonSvc`, `Fax`,
+  `WSearch`. Each value is backed up like any other, so `-Restore` puts the
+  original `Start` back. They take effect at the next boot: writing `Start` does
+  not stop a service that is already running.
+
+**`WaaSMedicSvc` is deliberately absent.** Its key is owned by TrustedInstaller
+and the service rewrites its own `Start` value, so "disabling" it achieves
+nothing except breaking Windows Update's ability to repair itself.
+
+**9 new apps**, all discontinued, superseded or newly force-installed:
+`microsoft.windowscommunicationsapps` (Mail & Calendar, end of support
+2024-12-31), `Microsoft.People`, `Microsoft.OutlookForWindows`,
+`Microsoft.M365Companions`, `Microsoft.YourPhone`,
+`MicrosoftWindows.CrossDevice`, `Microsoft.ZuneMusic`, `Microsoft.Whiteboard`,
+`Microsoft.GetHelp`.
+
+Three candidates were **excluded on purpose**, and the reasons are in the source
+so nobody re-adds them: `Microsoft.ScreenSketch` (on Windows 11 that package
+*is* the Snipping Tool), `Microsoft.Wallet` (Windows 10 Mobile only, retired
+2019) and `XP9CXNGPPJ97XX` (a Store product ID, which can never match a
+`Get-AppxPackage` name).
+
+**Six existing entries were wrong and are fixed:**
+
+| Entry | Was | Now |
+|---|---|---|
+| `DisableStickyKeys` | `MinBuild 26100` — excluded every Windows 10 and 22H2/23H2 machine | no gate; the key has worked since Windows 7 |
+| `DisableStorageSense` | `MinBuild 22000` — excluded Windows 10 | no gate; available since Windows 10 1809 |
+| `HideHome` | `MinBuild 22000` | `22621` — Home did not exist on 21H2 |
+| `HideGallery` | `MinBuild 22000` | `22621` — Gallery arrived in KB5030310 |
+| `DisableEdgeAds` | wrote `HideFirstRunExperience = 0`, which is the default and therefore a no-op that still created a policy key | `1` |
+| `DisableDragTray` | `-Default`, `MinBuild 26200` | no longer default, `MinBuild 22631`, with a note that Microsoft removed the feature in KB5121003 |
+
+Two further fixes to the machinery itself:
+
+* `HideSearchTb` and `ShowSearchIconTb` both write `SearchboxTaskbarMode`, so
+  asking for `-Group Taskbar` selected both and the second silently undid the
+  first. Selection now resolves the conflict and says so.
+* A tweak's `-Note` was captured by the catalogue but **never printed**. Notes
+  now appear under the entry in the census — which matters, because the riskiest
+  new entries (`DisableWSearchSvc`, `DisableHibernate`, `DisableWpcMonSvc`) are
+  exactly the ones whose cost you need to read before selecting them.
+* The `N/A` reason for a `MaxBuild` gate was hardcoded to "Windows 10 only",
+  which was wrong for `HideChat` (capped at 22621 — Windows 10 *and* Windows 11
+  22H2). It now reports the real gate.
+
 ### Usage
 
 ```powershell
@@ -1643,6 +1721,99 @@ powershell -Command ".\Remove-WindowsBloat.ps1 -Group Privacy,AI,Gaming -RemoveA
   and the provisioned list, and says so.
 
 ---
+
+## `Clean-StartupApps.ps1` — what actually starts at sign-in, and why
+
+Task Manager's **Startup apps** tab shows a file name and, if you are lucky, a publisher. It
+will tell you that `Update.exe` runs at every logon and leave you to work out whose updater
+that is. It flattens four different mechanisms into one list, gives no reason for any entry,
+and offers exactly one verb: Disable.
+
+This script answers the question Task Manager does not.
+
+### The four surfaces
+
+Everything that starts at sign-in comes from one of these, and the census covers all four:
+
+| Surface | Where it lives |
+|---|---|
+| Run keys | `HKCU` and `HKLM` `…\CurrentVersion\Run`, `RunOnce`, and the `WOW6432Node` variants |
+| Startup folders | the per-user one under `%APPDATA%`, and the all-users one under `%ProgramData%` |
+| Packaged `StartupTask`s | Store and MSIX apps that declare a startup task in their manifest — Terminal, Phone Link, Teams, WhatsApp |
+| Logon scheduled tasks | tasks with a logon trigger, outside `\Microsoft\Windows\` (with `-IncludeScheduledTasks`) |
+
+Task Manager's Enabled/Disabled column is the `StartupApproved` flag for the first two, and the
+`StartupTaskState` value for the third. This script reads and writes exactly those, so anything
+it changes shows up in Task Manager the way you would expect.
+
+### Identification, not just enumeration
+
+For every entry it resolves the real target, reads the binary's `CompanyName` and
+`FileDescription`, and checks the Authenticode signature. Then it names the thing:
+
+* **Generic stubs.** `Update.exe` under `%LOCALAPPDATA%\<App>\` is a Squirrel updater. The
+  script reads the `--processStart` argument and the parent folder and reports it as
+  *"Discord's auto-updater stub (Squirrel), which then launches Discord.exe"*. The same
+  treatment applies to `Launcher.exe`, `Helper.exe`, `Agent.exe` and the rest of the names
+  that identify nothing.
+* **Shortcuts.** A `.lnk` in the Startup folder is resolved to its target and arguments, so
+  `Send to OneNote.lnk` is reported as `ONENOTEM.EXE /tsr` — the Office tray tool that
+  provides OneNote 2016's screen-clipping hotkey.
+* **Packaged apps.** The task id is not the app name, so `StartTerminalOnLoginTask` is
+  reported against Windows Terminal.
+
+### Verdicts
+
+Each entry gets a verdict and the reason for it:
+
+| Verdict | Meaning |
+|---|---|
+| `KEEP` | Removing it degrades the machine — the Windows Security tray icon, the Realtek audio service. **Never touched**, not even by `-DisableOptional`, and a `-Disable` naming one is refused out loud |
+| `OPTIONAL` | A launcher, updater, tray icon or sync agent. The application still works when you start it yourself; you lose background updates or a notification icon |
+| `REVIEW` | Unsigned, unknown publisher, or it syncs your data. Needs a human |
+| `ORPHAN` | The target no longer exists. The entry does nothing but slow sign-in |
+
+Evidence on the machine overrides the catalogue: a missing target always wins, and so does an
+unsigned binary. That is why a known-good entry like Internet Download Manager still comes back
+`REVIEW` — its binary genuinely is not signed.
+
+### Disable rather than remove
+
+`-Disable` writes the same `StartupApproved` bytes Task Manager writes, so the entry stays in
+the list and can be turned back on. `-Remove` deletes the registry value or the shortcut and is
+only applied to entries you name explicitly, or to orphans via `-RemoveOrphans`. Packaged apps
+cannot be deleted at all — they are disabled instead, and the run says so.
+
+Every change is captured to a backup JSON first, and `-Restore` puts it all back. A deleted
+Startup-folder shortcut is the one thing that cannot be rebuilt automatically; the restore
+reports its original target so you can recreate it.
+
+### Elevation
+
+Unlike the other scripts here, this one does **not** self-elevate, because the useful half of
+its work needs no elevation: the `HKCU` Run key, your own Startup folder and the packaged app
+startup tasks are all yours to change. Only the machine-wide surfaces need administrator
+rights, and the run says plainly which rows it could not touch.
+
+```powershell
+# Census. Every entry, what it is, and what turning it off would cost you:
+.\Clean-StartupApps.ps1
+
+# Turn off three specific things - matched on entry name, executable or app name:
+.\Clean-StartupApps.ps1 -Disable Discord,jusched,iTunesHelper
+
+# See exactly what a "disable everything optional" run would do:
+.\Clean-StartupApps.ps1 -DisableOptional -WhatIf
+
+# Delete the entries whose targets are already gone:
+.\Clean-StartupApps.ps1 -RemoveOrphans
+
+# Include logon scheduled tasks in the census:
+.\Clean-StartupApps.ps1 -IncludeScheduledTasks
+
+# Put everything back:
+.\Clean-StartupApps.ps1 -Restore "$env:TEMP\StartupApps_20260906_101500.json"
+```
 
 ## `Clear-RevitCache.ps1` — Revit caches, without uninstalling anything
 

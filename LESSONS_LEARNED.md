@@ -319,6 +319,30 @@ Appx package on the machine.
 - **`return ,$array` double-nests** when the caller wraps in `@(...)`, fusing two
   uninstall candidates into one and handing `System.Object[]` to
   `Start-Process -FilePath`.
+- **`Test-Path -LiteralPath` THROWS on a malformed path; it does not return
+  `$false`.** It validates the string before it tests it, so a `"`, `<`, `>`,
+  `|` or a control character raises `ArgumentException` — and under
+  `$ErrorActionPreference = 'Stop'` that ends the run. `-LiteralPath` protects
+  against *wildcards*, not against *illegal characters*. Every path these
+  scripts test is second-hand (a service `ImagePath`, a scheduled-task action, a
+  Run key, an uninstall string), so all of them now go through a `Test-PathSafe`
+  wrapper that answers "no" instead of throwing. Found the hard way: a run that
+  had already removed the drivers died at the very last phase.
+- **`[IO.Path]::GetInvalidPathChars()` returns a DIFFERENT set per runtime.**
+  .NET Framework (Windows PowerShell 5.1) lists `"`, `<`, `>`, `|` and the
+  control characters; .NET Core (pwsh 7) trimmed the same call down to `NUL`
+  alone. Asking the framework therefore produces a *weaker* guard under 7 than
+  under 5.1, and a validator written against 5.1 silently stops validating. Spell
+  the set out in the script rather than asking for it.
+- **Vendors write junk into `ImagePath`.** Measured on this machine:
+  `GigabyteUpdateService` carries a trailing `U+FFFF` noncharacter after the
+  `.exe`. A resolver must cut at the image extension rather than trusting the
+  value to end where the path ends — and `REG_MULTI_SZ` (or a caller that
+  `[string]`-coerces an array) glues two paths together with a space, which is
+  not a path at all.
+- **`("a string")[0]` is a CHARACTER, not the string.** A helper that returns one
+  string and a caller that writes `(Get-Thing ...)[0]` silently yields `f`
+  instead of `function ...`. Wrap single returns as `,$value` or index nothing.
 - **`[Environment]::SetEnvironmentVariable` corrupts `PATH`** — see the README
   section; it returns the *expanded* value and always writes `REG_SZ`, baking
   `%SystemRoot%` into a literal and downgrading the value type.
@@ -370,6 +394,11 @@ line is a bug that already happened once.
 | 18 | List parameters accept one `"a,b"` string and split it **after** binding — no `[ValidateSet]` on a `[string[]]` that `-File` or a `.cmd` launcher can pass | Remove-LegacyHardwareResidue, Remove-WindowsBloat |
 | 19 | A `-match` against a pattern that can be `$null` is guarded at the use site — `-match $null` matches everything | Remove-LegacyHardwareResidue (Appx/Program/TaskName patterns) |
 | 20 | Function results that may be empty are wrapped in `@()` at the call site before `.Count` under `Set-StrictMode` | Remove-WindowsBloat |
+| 21 | No second-hand path (registry value, task action, shortcut target) reaches `Test-Path` directly — all of them go through the non-throwing `Test-PathSafe` | Remove-LegacyHardwareResidue, Clean-StartupApps |
+| 22 | Invalid path characters are spelled out, never taken from `[IO.Path]::GetInvalidPathChars()`, which is weaker under pwsh 7 than under 5.1 | Remove-LegacyHardwareResidue, Clean-StartupApps |
+| 23 | Every tweak carries an explicit `MinBuild`/`MaxBuild` so a Windows 10 value never fires on Windows 11 and vice versa | Remove-WindowsBloat |
+| 24 | Two tweaks never write the same registry value to different data; if they do, selection resolves the conflict out loud | Remove-WindowsBloat |
+| 25 | An entry classified KEEP is refused even when named explicitly | Clean-StartupApps |
 
 ### Known outstanding drift
 

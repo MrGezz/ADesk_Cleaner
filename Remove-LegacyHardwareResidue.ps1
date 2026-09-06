@@ -1220,9 +1220,38 @@ function Get-ComparablePath {
     return $p.TrimEnd('\', '/').ToLowerInvariant()
 }
 
+# .NET Framework's [IO.Path]::GetInvalidPathChars() lists " < > | and the
+# control characters. .NET Core trimmed that same call down to NUL alone, so
+# asking the framework produces a WEAKER answer under pwsh 7 than under
+# Windows PowerShell 5.1. This script has to behave identically on both, so
+# the set is spelled out. * and ? are included: after the \??\ and \\?\
+# prefixes are stripped, no legitimate binary path contains either.
+function Test-PathChars {
+    param([string]$Path)
+    if ([string]::IsNullOrEmpty($Path)) { return $false }
+    $bad = ([char[]]@('"', '<', '>', '|', '*', '?')) + [char[]](0..31)
+    return ($Path.IndexOfAny($bad) -lt 0)
+}
+
+# Test-Path VALIDATES a path before it tests it. A string carrying a character
+# that cannot occur in a path -- a quote, a pipe, a stray colon -- makes it
+# throw ArgumentException instead of returning $false, and under
+# $ErrorActionPreference = 'Stop' that ends the run. Every path this script
+# tests is second-hand: a service ImagePath, a scheduled task action, a Run
+# key, an uninstall string. None are guaranteed to be well formed. This
+# wrapper is the only way such a string reaches the filesystem, and it
+# answers "no" rather than throwing.
+function Test-PathSafe {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    if (-not (Test-PathChars $Path)) { return $false }
+    try { return [bool](Test-Path -LiteralPath $Path -ErrorAction Stop) }
+    catch { return $false }
+}
+
 function Get-FolderSizeMB {
     param([string]$Path)
-    if (-not (Test-Path -LiteralPath $Path)) { return 0 }
+    if (-not (Test-PathSafe $Path)) { return 0 }
     try {
         $sum = (Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
                 Measure-Object -Property Length -Sum).Sum
@@ -1410,24 +1439,78 @@ function Test-PackageStillRemovable {
 
 # --- Services -------------------------------------------------------------
 
+# Turn a raw registry ImagePath into the path of the service binary, or into
+# '' when the value is not something this script can reason about. Returning
+# '' is deliberate: the caller reads it as "no binary evidence" and leaves the
+# service alone, which is the safe direction.
 function Resolve-ServiceImagePath {
-    param([string]$ImagePath)
-    if ([string]::IsNullOrWhiteSpace($ImagePath)) { return '' }
-    $p = $ImagePath.Trim()
+    param($ImagePath)
+
+    # A REG_MULTI_SZ ImagePath, or a REG_SZ the caller already coerced from an
+    # array, arrives as several strings. Only the first is the binary; letting
+    # PowerShell string-coerce the whole array glues two paths together with a
+    # space, and the result is not a path at all. That is what reached
+    # Test-Path as "C:\WINDOWS\system32\... C:\Windows\system32\"
+    # and threw "Illegal characters in path".
+    if ($ImagePath -is [array]) {
+        if ($ImagePath.Count -eq 0) { return '' }
+        $ImagePath = $ImagePath[0]
+    }
+    $p = [string]$ImagePath
+    if ([string]::IsNullOrWhiteSpace($p)) { return '' }
+    $p = $p.Trim()
+
+    # NT object-manager and Win32 long-path prefixes.
     $p = $p -replace '^\\\?\?\\', ''
-    $p = $p -replace '^"([^"]+)".*$', '$1'
-    if ($p -match '^\\SystemRoot\\') { $p = $p -replace '^\\SystemRoot\\', ($env:SystemRoot + '\') }
-    elseif ($p -match '^system32\\') { $p = $env:SystemRoot + '\' + $p }
-    elseif ($p -match '^\\Windows\\') { $p = $env:SystemDrive + $p }
-    # Strip trailing command-line arguments from an unquoted path.
-    if ($p -notmatch '^"') { $p = ($p -split '\s+(?=[-/])')[0] }
-    return $p.Trim().Trim('"')
+    $p = $p -replace '^\\\\\?\\', ''
+
+    if ($p.StartsWith('"')) {
+        # Quoted program path: take what sits between the first pair of quotes.
+        # A missing closing quote means the value is malformed -- take the rest
+        # and let the sanity gate at the bottom reject it. The old regex
+        # ('^"([^"]+)".*$') simply did not fire on such a value, which left the
+        # interior quotes in place and made Test-Path throw.
+        $close = $p.IndexOf('"', 1)
+        if ($close -gt 1) { $p = $p.Substring(1, $close - 1) }
+        else { $p = $p.Substring(1) }
+    }
+    else {
+        # Unquoted: arguments begin after the executable, so cut at the first
+        # image extension. Splitting only on ' -' and ' /' (the old rule) left
+        # a value like 'foo.exe bar.dll' fused into one impossible path.
+        if ($p -match '^(.*?\.(?:exe|sys|dll|com|bat|cmd))(?:\s|$)') { $p = $Matches[1] }
+        else { $p = ($p -split '\s+(?=[-/])')[0] }
+    }
+
+    $p = $p.Trim().Trim('"').Trim()
+    if ([string]::IsNullOrWhiteSpace($p)) { return '' }
+
+    # REG_EXPAND_SZ values arrive already expanded; a REG_SZ holding the same
+    # text does not.
+    if ($p -match '%\w+%') {
+        try { $p = [Environment]::ExpandEnvironmentVariables($p) } catch { }
+    }
+
+    if ($p -match '^\\\\') { }   # UNC -- never prefix a drive letter.
+    elseif ($p -match '^\\SystemRoot\\') { $p = $p -replace '^\\SystemRoot\\', ($env:SystemRoot + '\') }
+    elseif ($p -match '^SystemRoot\\')       { $p = $p -replace '^SystemRoot\\',       ($env:SystemRoot + '\') }
+    elseif ($p -match '^system32\\')         { $p = $env:SystemRoot + '\' + $p }
+    elseif ($p -match '^\\Windows\\')    { $p = $env:SystemDrive + $p }
+    elseif ($p -match '^\\')                 { $p = $env:SystemDrive + $p }
+
+    $p = $p.Trim()
+
+    # Sanity gate. Anything that is not a plain rooted path is not something
+    # this script may hand to the filesystem.
+    if (-not (Test-PathChars $p)) { return '' }
+    if ($p -notmatch '^([A-Za-z]:\\|\\\\)') { return '' }
+    return $p
 }
 
 function Get-BinaryCompany {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
-    if (-not (Test-Path -LiteralPath $Path)) { return '' }
+    if (-not (Test-PathSafe $Path)) { return '' }
     try {
         $vi = [Diagnostics.FileVersionInfo]::GetVersionInfo($Path)
         $c = $vi.CompanyName
@@ -1456,10 +1539,11 @@ function Get-VendorServices {
         $props = $null
         try { $props = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction Stop } catch { continue }
 
-        $img   = [string](Get-Prop $props 'ImagePath')
+        $imgRaw = Get-Prop $props 'ImagePath'
+        $img   = if ($imgRaw -is [array]) { ($imgRaw -join ' ') } else { [string]$imgRaw }
         $disp  = [string](Get-Prop $props 'DisplayName')
         $start = ConvertTo-IntOrZero (Get-Prop $props 'Start')
-        $file  = Resolve-ServiceImagePath $img
+        $file  = Resolve-ServiceImagePath $imgRaw
 
         $onList  = ($VendorProfile.ServiceNames -contains $name)
         $company = Get-BinaryCompany $file
@@ -1474,7 +1558,7 @@ function Get-VendorServices {
 
         # A service whose binary is gone is an orphan registration: nothing can
         # start it, and it is safe to delete without stopping anything.
-        $missing = (-not [string]::IsNullOrWhiteSpace($file)) -and (-not (Test-Path -LiteralPath $file))
+        $missing = (-not [string]::IsNullOrWhiteSpace($file)) -and (-not (Test-PathSafe $file))
 
         $evidence = @()
         if ($onList)  { $evidence += 'name on vendor list' }
@@ -1516,7 +1600,7 @@ function Get-VendorScheduledTasks {
             if ($exe) {
                 $clean = $exe.Trim().Trim('"')
                 $actions += $clean
-                if (-not (Test-Path -LiteralPath $clean)) { $anyMissing = $true }
+                if (-not (Test-PathSafe $clean)) { $anyMissing = $true }
             }
         }
         [pscustomobject]@{
@@ -1574,7 +1658,7 @@ function Get-OrphanStartupApprovals {
     foreach ($d in @(
         (Join-Path $env:APPDATA     'Microsoft\Windows\Start Menu\Programs\Startup'),
         (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Startup'))) {
-        if (-not (Test-Path -LiteralPath $d)) { continue }
+        if (-not (Test-PathSafe $d)) { continue }
         Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue |
             ForEach-Object { [void]$runNames.Add($_.Name) }
     }
@@ -1633,7 +1717,7 @@ function Resolve-RunCommandTarget {
     $matches1 = [regex]::Matches($c, $extPattern)
     foreach ($m in $matches1) {
         $cand = $c.Substring(0, $m.Index + $m.Length)
-        if (Test-Path -LiteralPath $cand) { return $cand }
+        if (Test-PathSafe $cand) { return $cand }
     }
 
     # Nothing resolved. Report the first candidate so the caller can say
@@ -1672,7 +1756,7 @@ function Get-DeadRunEntries {
 
             # Dead ONLY when a concrete target was resolved and it is absent.
             # $exe of $null means "could not tell", which is never dead.
-            $dead = ($null -ne $exe) -and (-not (Test-Path -LiteralPath $exe))
+            $dead = ($null -ne $exe) -and (-not (Test-PathSafe $exe))
 
             if ($dead -or $isVendor) {
                 $out += [pscustomobject]@{
@@ -1789,7 +1873,7 @@ function Get-VendorPrograms {
             # name from the cached setup.ini so the operator knows what it is.
             if ([string]::IsNullOrWhiteSpace($name)) {
                 $ini = Join-Path (Split-Path -Parent $cmd) 'setup.ini'
-                if (Test-Path -LiteralPath $ini) {
+                if (Test-PathSafe $ini) {
                     $m = Select-String -LiteralPath $ini -Pattern '^\s*Product\s*=\s*(.+)$' -ErrorAction SilentlyContinue |
                          Select-Object -First 1
                     if ($m) { $name = "$($m.Matches[0].Groups[1].Value.Trim()) (no DisplayName)" }
@@ -1832,7 +1916,7 @@ function Get-VendorPrograms {
         $srcPath   = [string]$p.InstallSource
         $srcExists = $true
         if (-not [string]::IsNullOrWhiteSpace($srcPath)) {
-            $srcExists = Test-Path -LiteralPath $srcPath
+            $srcExists = Test-PathSafe $srcPath
         }
         $reachable = $true
         $unreachableReason = ''
@@ -1841,7 +1925,7 @@ function Get-VendorPrograms {
             $unreachableReason = "InstallSource '$srcPath' no longer exists; setup.exe would block on a 'needs the next disk' prompt"
         }
         elseif ($kind -ne 'Msi' -and -not [string]::IsNullOrWhiteSpace($cmd) -and
-                -not (Test-Path -LiteralPath $cmd)) {
+                -not (Test-PathSafe $cmd)) {
             $reachable = $false
             $unreachableReason = "uninstaller '$cmd' is missing"
         }
@@ -2034,7 +2118,7 @@ function Get-VendorRoots {
     param($VendorProfile)
     $out = @()
     foreach ($r in $VendorProfile.Roots) {
-        if (Test-Path -LiteralPath $r) {
+        if (Test-PathSafe $r) {
             $out += [pscustomobject]@{ Path = $r; SizeMB = (Get-FolderSizeMB $r) }
         }
     }
@@ -2049,7 +2133,7 @@ function Get-VendorRoots {
         foreach ($leaf in $VendorProfile.UserRoots) {
             foreach ($mid in @('AppData\Local', 'AppData\Roaming')) {
                 $p = Join-Path $u.FullName (Join-Path $mid $leaf)
-                if (Test-Path -LiteralPath $p) {
+                if (Test-PathSafe $p) {
                     $out += [pscustomobject]@{ Path = $p; SizeMB = (Get-FolderSizeMB $p) }
                 }
             }
@@ -2256,7 +2340,7 @@ foreach ($vp in $VendorProfiles) {
     # services whose binaries live inside the driver store.
     $pkgDirs = @()
     $fileRepo = Join-Path $env:SystemRoot 'System32\DriverStore\FileRepository'
-    if (Test-Path -LiteralPath $fileRepo) {
+    if (Test-PathSafe $fileRepo) {
         foreach ($entry in $plan.Packages) {
             if ($entry.Vendor -ne $vp.Vendor) { continue }
             $stem = [IO.Path]::GetFileNameWithoutExtension($entry.Package.Original)
@@ -2401,7 +2485,7 @@ if ($plan.Packages.Count -gt 0) {
         $grpMB = 0
         foreach ($e in $grp.Group) {
             $stem = [IO.Path]::GetFileNameWithoutExtension($e.Package.Original)
-            if ($stem -and (Test-Path -LiteralPath $fileRepo)) {
+            if ($stem -and (Test-PathSafe $fileRepo)) {
                 Get-ChildItem -LiteralPath $fileRepo -Directory -Filter "$stem.inf_*" -ErrorAction SilentlyContinue |
                     ForEach-Object {
                         if ($seenDirs.Add($_.FullName)) { $grpMB += (Get-FolderSizeMB $_.FullName) }
@@ -2712,9 +2796,9 @@ if ($RemoveOrphanRegistrations -and $plan.Orphans.Count -gt 0) {
         # still looks like an InstallShield cache. A CacheDir that no longer
         # holds setup.exe or ISSetup.dll is not one, and is not deleted on the
         # strength of a path string alone.
-        if (-not [string]::IsNullOrWhiteSpace($prog.CacheDir) -and (Test-Path -LiteralPath $prog.CacheDir)) {
-            $looksRight = (Test-Path -LiteralPath (Join-Path $prog.CacheDir 'setup.exe')) -or
-                          (Test-Path -LiteralPath (Join-Path $prog.CacheDir 'ISSetup.dll'))
+        if (-not [string]::IsNullOrWhiteSpace($prog.CacheDir) -and (Test-PathSafe $prog.CacheDir)) {
+            $looksRight = (Test-PathSafe (Join-Path $prog.CacheDir 'setup.exe')) -or
+                          (Test-PathSafe (Join-Path $prog.CacheDir 'ISSetup.dll'))
             if (-not $looksRight) {
                 Write-Log "      REFUSE $($prog.CacheDir): does not look like an InstallShield cache." 'REFUSE'
             }
@@ -2876,7 +2960,7 @@ if ($RemoveResidualFiles -and $plan.Roots.Count -gt 0) {
             Write-Log "  REFUSE ${path}: fails the residual-path safety check." 'REFUSE'
             continue
         }
-        if (-not (Test-Path -LiteralPath $path)) {
+        if (-not (Test-PathSafe $path)) {
             Write-Log "  SKIP ${path}: already gone." 'INFO'
             continue
         }

@@ -294,6 +294,44 @@ that can be `$null` (Appx pattern, program pattern, root-task pattern) is
 guarded at every use site, or the vendor with no Appx pattern is handed every
 Appx package on the machine.
 
+### E7. A name test cannot tell a clone from your extensions
+
+`Uninstall-PyRevit-Complete.ps1` read `pyRevit_config.ini` by scanning every line
+for anything shaped like a drive-letter path and treating each hit that contained
+"pyrevit" as a clone to delete. The INI's `userextensions` key holds the user's
+own extension folders — on this machine `...\IcZ PyRevit\IcZWorkSpace`, on the
+other install a folder on `D:` — and both matched. The function-level guard (E2)
+was the same substring test, so it let them through, and the sweep deleted a
+development workspace on a second drive.
+
+No spelling of the name check fixes this: the workspace really is named after
+pyRevit. The fix is to classify by **what a folder contains** and **where it is**:
+
+- read the INI by section and key — `[environment] clones` are candidates,
+  `[core] userextensions` are protected, nothing else is consulted;
+- a folder holding `bin\` + `pyrevitlib\` is a clone; a folder named
+  `*.extension`, or directly holding one, is a user extension area and is never
+  deleted; anything under a footprint root (`%APPDATA%`, `%LOCALAPPDATA%`,
+  `%PROGRAMDATA%`, `%TEMP%`, ...) is pyRevit's; anything else is unverified and
+  only reported;
+- nothing outside `%SystemDrive%` is touched unless asked, and then only a
+  verified clone;
+- all three fences live inside `Remove-Tree`, and what they keep is listed and
+  excluded from the verdict so the run can still end CLEAN.
+
+Two things made the test harness worth writing. Paths on this machine come in
+two spellings — `%TEMP%` is `C:\Users\ICECRE~1\...`, `Get-ChildItem` returns
+`C:\Users\IceCreamAssasin\...` — and they compare unequal, so every path that
+crosses a fence is normalised to the long form first (`Get-Item` does it). And a
+regression test that passes has to be shown able to fail:
+`tests\Test-PyRevitFences.ps1` has an `-ExpectDefective` mode that passes only
+when the pre-fix copy WOULD have deleted the workspace.
+
+> **Rule: never delete on the strength of a name. Classify by content and
+> location, and put the classification inside the deletion function.**
+
+---
+
 ## F. Windows PowerShell 5.1 traps
 
 - **StrictMode: guard the absent OBJECT as well as the absent property.**
@@ -389,6 +427,36 @@ Appx package on the machine.
 
 ---
 
+## F3. WPF from PowerShell: the ResourceDictionary keeps the PSObject
+
+`hub\Start-Hub.ps1` swaps its theme by rewriting the brushes in the window's
+resource dictionary. The first cut did the obvious thing:
+
+```powershell
+$window.Resources['Text'] = New-Object System.Windows.Media.SolidColorBrush $color
+```
+
+and every `{DynamicResource Text}` consumer threw
+`'#FFF1F5F9' is not a valid value for property 'Foreground'`. The indexer's
+parameter is `object`, and when the target type is `object` PowerShell passes
+its **PSObject wrapper** through unconverted. WPF then holds a PSObject where it
+expects a Brush, fails the type check, and reports the value's string form.
+
+Two fixes, both verified: mutate the XAML-declared brush in place
+(`$window.Resources['Text'].Color = $color` — brushes declared in a
+`ResourceDictionary` are not frozen, and the change reaches every consumer), or
+unwrap explicitly with `$brush.psobject.BaseObject` before assigning. The hub
+does the former and falls back to the latter for a key the XAML does not declare.
+
+The same wrapper is why `FindWindow($null, $title)` never finds anything from
+PowerShell: `$null` marshals to `""` for a `string` parameter, so the call
+searches for an empty class name. Enumerate windows by title instead.
+
+> **Rule: anything handed to a .NET `object` parameter from PowerShell may still
+> be a PSObject. Unwrap it, or avoid the handoff.**
+
+---
+
 ## G. The meta-lesson: drift between sibling scripts
 
 These scripts deliberately ship as **standalone files** with no shared module, so
@@ -402,7 +470,7 @@ verification existed only in Navisworks; the junction guard only in AutoCAD.
 > **Rule: when you fix something in one uninstaller, immediately check the other
 > three.** Cheapest way to do it:
 > ```bash
-> grep -n "Test-SafeResidualPath\|WhatIfPreference\|/X" Uninstall-*.ps1
+> grep -n "Test-SafeResidualPath\|WhatIfPreference\|/X" scripts/*/Uninstall-*.ps1
 > ```
 
 ---
@@ -440,6 +508,10 @@ line is a bug that already happened once.
 | 24 | Two tweaks never write the same registry value to different data; if they do, selection resolves the conflict out loud | Remove-WindowsBloat |
 | 25 | An entry classified KEEP is refused even when named explicitly | Clean-StartupApps |
 | 26 | The Explorer-pause test reads `CMDCMDLINE` through a real variable, never `!cmdcmdline:...!` directly — substring substitution does not apply to a dynamic variable | all 12 `.cmd` launchers |
+| 27 | No folder is deleted on the strength of its name: the deletion function classifies by content (clone markers, `*.extension` children) and location (footprint roots, system drive) and refuses the rest, out loud | Uninstall-PyRevit-Complete |
+| 28 | `pyRevit_config.ini` is read by section and key; `userextensions` paths are protected and are never candidates | Uninstall-PyRevit-Complete |
+| 29 | Paths that cross a guard are compared in long form — an 8.3 `%TEMP%` and a long `Get-ChildItem` result are the same folder | Uninstall-PyRevit-Complete |
+| 30 | `tests\Test-PyRevitFences.ps1` passes, and passes in `-ExpectDefective` mode against the pre-fix copy | Uninstall-PyRevit-Complete |
 
 ### Known outstanding drift
 

@@ -287,16 +287,16 @@ reference `Revit`/`RVT`, and contain `2026`; anything else is refused.
 
 ```powershell
 # Preview only (safe first run) — lists matched products + residual folders:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2026 -ListOnly
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Revit.ps1 -ProductYear 2026 -ListOnly
 
 # Full removal (core + orphaned add-ins + residual), unattended and silent:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2026 -StopRevit -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Revit.ps1 -ProductYear 2026 -StopRevit -Force
 
 # Also remove the year's Material Library packages (opt-in, bare switch):
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2026 -IncludeMaterialLibraries
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Revit.ps1 -ProductYear 2026 -IncludeMaterialLibraries
 
 # Core product only — turning a default-on [bool] OFF needs -Command, not -File (lesson 7):
-powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-Revit.ps1' -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false"
+powershell -ExecutionPolicy Bypass -Command "& '.\scripts\autodesk\Uninstall-Revit.ps1' -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false"
 ```
 
 Re-running is idempotent: already-removed items no longer match, and `1605`

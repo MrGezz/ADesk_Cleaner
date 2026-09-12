@@ -1,0 +1,144 @@
+{
+  "title": "ADesk Cleaner",
+  "tagline": "Registry-driven, preview-first Windows cleanup scripts. Pick one, read what it does, preview, then run.",
+  "groups": [
+    { "id": "autodesk", "name": "Autodesk & Revit", "blurb": "Revit, AutoCAD, Navisworks, pyRevit, and Revit's caches" },
+    { "id": "vendors",  "name": "Other vendors",    "blurb": "Adobe Creative Cloud, Fortinet FortiClient" },
+    { "id": "windows",  "name": "Windows",          "blurb": "Bloat, legacy hardware residue, startup apps, the Search index" },
+    { "id": "utility",  "name": "Utility",          "blurb": "General-purpose cleanup" }
+  ],
+  "scripts": [
+    {
+      "id": "uninstall-revit",
+      "name": "Uninstall Revit",
+      "file": "scripts/autodesk/Uninstall-Revit.ps1",
+      "group": "autodesk",
+      "summary": "Autodesk Revit, any year: the core application plus its orphaned add-ins, content packs and exporters.",
+      "elevation": "self",
+      "risk": "high",
+      "preview": ["-ListOnly"],
+      "logPattern": "Uninstall-Revit*.log"
+    },
+    {
+      "id": "uninstall-autocad",
+      "name": "Uninstall AutoCAD",
+      "file": "scripts/autodesk/Uninstall-AutoCAD.ps1",
+      "group": "autodesk",
+      "summary": "Autodesk AutoCAD, any year: the whole per-year family (ODIS bundle, updates, the two hidden MSI children) plus orphaned add-ins.",
+      "elevation": "self",
+      "risk": "high",
+      "preview": ["-ListOnly"],
+      "logPattern": "Uninstall-AutoCAD*.log"
+    },
+    {
+      "id": "uninstall-navisworks",
+      "name": "Uninstall Navisworks",
+      "file": "scripts/autodesk/Uninstall-Navisworks.ps1",
+      "group": "autodesk",
+      "summary": "Navisworks Manage / Simulate / Freedom, any year: the ODIS bundle, the hidden MSI child and all language packs. Preserves the NWC exporters by default.",
+      "elevation": "self",
+      "risk": "high",
+      "preview": ["-ListOnly"],
+      "logPattern": "Uninstall-Navisworks*.log"
+    },
+    {
+      "id": "uninstall-pyrevit",
+      "name": "Uninstall pyRevit",
+      "file": "scripts/autodesk/Uninstall-PyRevit-Complete.ps1",
+      "group": "autodesk",
+      "summary": "pyRevit and pyRevit CLI: clones, add-in manifests, registrations, Start Menu and PATH entries. Never touches your own extensions or another drive.",
+      "elevation": "optional",
+      "risk": "high",
+      "preview": ["-DryRun"],
+      "logPattern": "pyrevit_uninstall_*.log"
+    },
+    {
+      "id": "clear-revitcache",
+      "name": "Clear Revit caches",
+      "file": "scripts/autodesk/Clear-RevitCache.ps1",
+      "group": "autodesk",
+      "summary": "Keeps Revit installed and clears its per-user caches: accelerator cache, web caches, journal history, and opt-in the collaboration cache and Recent models.",
+      "elevation": "none",
+      "risk": "medium",
+      "preview": ["-ListOnly"],
+      "logPattern": "Clear-RevitCache*.log"
+    },
+    {
+      "id": "uninstall-adobe",
+      "name": "Uninstall Adobe products",
+      "file": "scripts/vendors/Uninstall-Adobe.ps1",
+      "group": "vendors",
+      "summary": "Creative Cloud products you select, by SAP code or name, through Adobe's own HyperDrive uninstaller. Preserves shared runtimes other Adobe apps still use.",
+      "elevation": "self",
+      "risk": "high",
+      "preview": ["-ListOnly"],
+      "logPattern": "Uninstall-Adobe*.log"
+    },
+    {
+      "id": "uninstall-forticlient",
+      "name": "Uninstall FortiClient",
+      "file": "scripts/vendors/Uninstall-FortiClient.ps1",
+      "group": "vendors",
+      "summary": "Fortinet FortiClient: the MSI plus the network-stack residue it orphans - kernel drivers, driver-store packages, virtual adapter devnodes, firewall rules and config hives.",
+      "elevation": "self",
+      "risk": "high",
+      "preview": ["-ListOnly"],
+      "logPattern": "Uninstall-FortiClient*.log"
+    },
+    {
+      "id": "remove-windowsbloat",
+      "name": "Remove Windows bloat",
+      "file": "scripts/windows/Remove-WindowsBloat.ps1",
+      "group": "windows",
+      "summary": "Pre-installed Store apps, telemetry, tips and ads, Copilot / Recall, Bing in search, Widgets. Census-first; every registry value is backed up and restorable with -Restore.",
+      "elevation": "self",
+      "risk": "medium",
+      "preview": ["-ListOnly"],
+      "logPattern": "Remove-WindowsBloat*.log"
+    },
+    {
+      "id": "remove-legacyhardware",
+      "name": "Remove legacy hardware residue",
+      "file": "scripts/windows/Remove-LegacyHardwareResidue.ps1",
+      "group": "windows",
+      "summary": "Every previous build's driver stack on a Windows install that moved between machines: driver packages, services, tasks, phantom devnodes and folders. Refuses any vendor whose hardware is still present.",
+      "elevation": "self",
+      "risk": "high",
+      "preview": ["-ListOnly"],
+      "logPattern": "LegacyHardwareResidue*.log"
+    },
+    {
+      "id": "clean-startupapps",
+      "name": "Audit and clean startup apps",
+      "file": "scripts/windows/Clean-StartupApps.ps1",
+      "group": "windows",
+      "summary": "Everything that launches itself at sign-in, across Run keys, Startup folders, packaged StartupTasks and logon tasks - with what each entry actually is. Disable, remove or restore.",
+      "elevation": "optional",
+      "risk": "low",
+      "preview": ["-ListOnly"],
+      "logPattern": "StartupApps*.log"
+    },
+    {
+      "id": "reset-searchindex",
+      "name": "Reset the Search index",
+      "file": "scripts/windows/Reset-SearchIndex.ps1",
+      "group": "windows",
+      "summary": "Resets and rebuilds the Windows Search index and lifts the self-throttling that otherwise makes the rebuild take days. Restores the ACL of the one owner-locked key it writes.",
+      "elevation": "self",
+      "risk": "medium",
+      "preview": ["-Status"],
+      "logPattern": ""
+    },
+    {
+      "id": "clean-directory",
+      "name": "Clean a directory",
+      "file": "scripts/utility/Clean-Directory.ps1",
+      "group": "utility",
+      "summary": "Recursive sweep for build junk (*.bak, __pycache__) under a directory you name.",
+      "elevation": "none",
+      "risk": "low",
+      "preview": ["-WhatIf"],
+      "logPattern": ""
+    }
+  ]
+}

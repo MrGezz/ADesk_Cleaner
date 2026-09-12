@@ -10,22 +10,61 @@ and fully logged.
 
 | Script | Removes | Elevation |
 |---|---|---|
-| [`Uninstall-Revit.ps1`](Uninstall-Revit.ps1) | **Autodesk Revit**, any year — core application plus its orphaned add-ins, content packs, and exporters | Required (self-elevates) |
-| [`Uninstall-AutoCAD.ps1`](Uninstall-AutoCAD.ps1) | **Autodesk AutoCAD**, any year — the whole per-year product family (ODIS bundle, updates, and the two hidden MSI children) plus orphaned add-ins | Required (self-elevates) |
-| [`Uninstall-Navisworks.ps1`](Uninstall-Navisworks.ps1) | **Autodesk Navisworks** Manage / Simulate / Freedom, any year — the ODIS bundle, the hidden MSI child, and all 11 language packs. **Preserves the NWC exporters by default** | Required (self-elevates) |
-| [`Uninstall-PyRevit-Complete.ps1`](Uninstall-PyRevit-Complete.ps1) | **pyRevit** and **pyRevit CLI** — clones, add-in manifests, Windows installation registrations, Start Menu entries, `PATH` entries | Optional |
-| [`Uninstall-FortiClient.ps1`](Uninstall-FortiClient.ps1) | **Fortinet FortiClient** — the MSI, plus the network-stack residue it orphans: kernel drivers, driver-store packages, the virtual adapter devnodes, firewall rules and config hives | Required (self-elevates) |
-| [`Uninstall-Adobe.ps1`](Uninstall-Adobe.ps1) | **Adobe Creative Cloud products you select** — Photoshop, Illustrator, Acrobat and the rest, by SAP code or name, via Adobe's own HyperDrive uninstaller. **Preserves shared runtimes** other Adobe apps still reference | Required (self-elevates) |
-| [`Remove-LegacyHardwareResidue.ps1`](Remove-LegacyHardwareResidue.ps1) | **Every previous build's platform stack**, on a Windows install that moves from machine to machine — a catalogue of ASUS, Intel, AMD, NVIDIA, Gigabyte, MSI, ASRock, the laptop OEMs and their component vendors: driver packages, services, scheduled tasks, phantom devnodes and folders; plus the phantom PCI/ACPI/disk/monitor devnodes of old builds, and a discovery pass for vendors it has no profile for. **Refuses, per bucket, any vendor whose hardware is still present** | Required (self-elevates; `-ListOnly` does not) |
-| [`Remove-WindowsBloat.ps1`](Remove-WindowsBloat.ps1) | **Windows' own bloat** — the pre-installed Store apps, telemetry, tips and ads, Copilot / Recall / Click To Do, Bing in search, Widgets — as a census-first run that **backs up every registry value it changes** and puts them all back with `-Restore` | Required (self-elevates; `-ListOnly` does not) |
-| [`Clean-StartupApps.ps1`](Clean-StartupApps.ps1) | Not an uninstaller — audits **everything that launches itself at sign-in** across all four mechanisms (Run keys, Startup folders, packaged `StartupTask`s, logon scheduled tasks) and, for each one, says **what it actually is**. Resolves `Update.exe` to the app that owns it, `.lnk` files to their targets, and package task ids to their apps; then disables, removes or restores them | Optional (per-user surfaces need none; machine-wide ones do) |
-| [`Clear-RevitCache.ps1`](Clear-RevitCache.ps1) | Not an uninstaller — **keeps Revit installed** and clears its per-user caches: accelerator cache, web caches, journal history, and (opt-in) the cloud collaboration cache and the Home screen's Recent models page | None |
-| [`Reset-SearchIndex.ps1`](Reset-SearchIndex.ps1) | Not an uninstaller — resets and rebuilds the **Windows Search** index, and lifts the self-throttling that otherwise makes the rebuild take days. Writes one owner-locked registry key that not even SYSTEM can write, then **restores its original ACL and owner** | Required (self-elevates; `-Status` and `-Analyze` do not) |
-| [`Clean-Directory.ps1`](Clean-Directory.ps1) | Not an uninstaller — a recursive sweep for build junk (`*.bak`, `__pycache__`) under a directory you name | None |
+| [`Uninstall-Revit.ps1`](scripts/autodesk/Uninstall-Revit.ps1) | **Autodesk Revit**, any year — core application plus its orphaned add-ins, content packs, and exporters | Required (self-elevates) |
+| [`Uninstall-AutoCAD.ps1`](scripts/autodesk/Uninstall-AutoCAD.ps1) | **Autodesk AutoCAD**, any year — the whole per-year product family (ODIS bundle, updates, and the two hidden MSI children) plus orphaned add-ins | Required (self-elevates) |
+| [`Uninstall-Navisworks.ps1`](scripts/autodesk/Uninstall-Navisworks.ps1) | **Autodesk Navisworks** Manage / Simulate / Freedom, any year — the ODIS bundle, the hidden MSI child, and all 11 language packs. **Preserves the NWC exporters by default** | Required (self-elevates) |
+| [`Uninstall-PyRevit-Complete.ps1`](scripts/autodesk/Uninstall-PyRevit-Complete.ps1) | **pyRevit** and **pyRevit CLI** — clones, add-in manifests, Windows installation registrations, Start Menu entries, `PATH` entries | Optional |
+| [`Uninstall-FortiClient.ps1`](scripts/vendors/Uninstall-FortiClient.ps1) | **Fortinet FortiClient** — the MSI, plus the network-stack residue it orphans: kernel drivers, driver-store packages, the virtual adapter devnodes, firewall rules and config hives | Required (self-elevates) |
+| [`Uninstall-Adobe.ps1`](scripts/vendors/Uninstall-Adobe.ps1) | **Adobe Creative Cloud products you select** — Photoshop, Illustrator, Acrobat and the rest, by SAP code or name, via Adobe's own HyperDrive uninstaller. **Preserves shared runtimes** other Adobe apps still reference | Required (self-elevates) |
+| [`Remove-LegacyHardwareResidue.ps1`](scripts/windows/Remove-LegacyHardwareResidue.ps1) | **Every previous build's platform stack**, on a Windows install that moves from machine to machine — a catalogue of ASUS, Intel, AMD, NVIDIA, Gigabyte, MSI, ASRock, the laptop OEMs and their component vendors: driver packages, services, scheduled tasks, phantom devnodes and folders; plus the phantom PCI/ACPI/disk/monitor devnodes of old builds, and a discovery pass for vendors it has no profile for. **Refuses, per bucket, any vendor whose hardware is still present** | Required (self-elevates; `-ListOnly` does not) |
+| [`Remove-WindowsBloat.ps1`](scripts/windows/Remove-WindowsBloat.ps1) | **Windows' own bloat** — the pre-installed Store apps, telemetry, tips and ads, Copilot / Recall / Click To Do, Bing in search, Widgets — as a census-first run that **backs up every registry value it changes** and puts them all back with `-Restore` | Required (self-elevates; `-ListOnly` does not) |
+| [`Clean-StartupApps.ps1`](scripts/windows/Clean-StartupApps.ps1) | Not an uninstaller — audits **everything that launches itself at sign-in** across all four mechanisms (Run keys, Startup folders, packaged `StartupTask`s, logon scheduled tasks) and, for each one, says **what it actually is**. Resolves `Update.exe` to the app that owns it, `.lnk` files to their targets, and package task ids to their apps; then disables, removes or restores them | Optional (per-user surfaces need none; machine-wide ones do) |
+| [`Clear-RevitCache.ps1`](scripts/autodesk/Clear-RevitCache.ps1) | Not an uninstaller — **keeps Revit installed** and clears its per-user caches: accelerator cache, web caches, journal history, and (opt-in) the cloud collaboration cache and the Home screen's Recent models page | None |
+| [`Reset-SearchIndex.ps1`](scripts/windows/Reset-SearchIndex.ps1) | Not an uninstaller — resets and rebuilds the **Windows Search** index, and lifts the self-throttling that otherwise makes the rebuild take days. Writes one owner-locked registry key that not even SYSTEM can write, then **restores its original ACL and owner** | Required (self-elevates; `-Status` and `-Analyze` do not) |
+| [`Clean-Directory.ps1`](scripts/utility/Clean-Directory.ps1) | Not an uninstaller — a recursive sweep for build junk (`*.bak`, `__pycache__`) under a directory you name | None |
 
 > All eight uninstallers share the same philosophy: discover what is installed from the registry
 > rather than from hardcoded paths or GUIDs, invoke the vendor's own uninstaller wherever one
 > exists, preview before acting, refuse to touch shared components, and log everything.
+
+## Where things are, and the hub
+
+```
+Start-Hub.cmd        double-click this: one window to find, read about, preview and run every script
+README.md            this manual
+scripts\autodesk\    Uninstall-Revit, Uninstall-AutoCAD, Uninstall-Navisworks, Uninstall-PyRevit-Complete, Clear-RevitCache
+scripts\vendors\     Uninstall-Adobe, Uninstall-FortiClient
+scripts\windows\     Remove-WindowsBloat, Remove-LegacyHardwareResidue, Clean-StartupApps, Reset-SearchIndex
+scripts\utility\     Clean-Directory
+hub\                 Start-Hub.ps1 (the window) and catalog.json (what it lists)
+docs\                TROUBLESHOOTING.md, LESSONS_LEARNED.md, Revit_Uninstall_Reference.md
+tests\               Test-PyRevitFences.ps1 - regression test for the pyRevit deletion fences
+```
+
+Each script sits beside its `.cmd` launcher in its `scripts\` folder. The usage lines in this
+file are written to be run from the repository root; from inside a script's own folder, drop
+the `scripts\...\` prefix.
+
+**`Start-Hub.cmd`** opens the hub: a WPF window (Windows PowerShell 5.1, nothing to install)
+that lists every script by group, shows its header text and its parameters — read live from
+the script through the PowerShell parser, so the form can never drift from the code — and
+starts it in a new console window, elevated when you tick the box. Three things it does that
+the `.cmd` launchers cannot:
+
+- It builds a `-Command` invocation, so a default-on `bool` can be turned off
+  (`-RemoveApps:$false`) and a list is passed as a list (`-Scope 'Intel','ASUS'`) — every case
+  marked *needs `-Command`* below.
+- It shows the exact command line before you run it, and copies it to the clipboard.
+- **Preview** runs the script's own no-change mode (`-ListOnly`, `-DryRun`, `-Status`, `-WhatIf`)
+  with one click; **Run** asks for confirmation on anything that uninstalls software.
+
+Every script the hub starts keeps its window open until you press Enter, so its output, its
+prompts and its exit code stay readable. The selected script's recent logs are listed in the
+hub and open in Notepad on double-click. The **Dark mode** toggle in the header switches the
+theme live; the choice is remembered in `%LOCALAPPDATA%\ADeskCleaner\hub-settings.json`, and on
+first run the hub follows Windows' own app mode. `hub\Start-Hub.ps1 -SelfTest` parses every
+script and builds every form in both themes without showing the window — run it after adding
+a script to `catalog.json`.
 
 Every script has a matching `.cmd` launcher beside it — `Uninstall-Revit.cmd` next to
 `Uninstall-Revit.ps1`, and so on. Each runs its script in Windows PowerShell 5.1 with the
@@ -51,7 +90,7 @@ when it finishes, leaving only the transcript in `%TEMP%` to read.
 | Removing Revit itself | `Uninstall-Revit.ps1` |
 | Removing AutoCAD itself | `Uninstall-AutoCAD.ps1` |
 | Removing Navisworks itself | `Uninstall-Navisworks.ps1` |
-| Revit uninstall fails with `1603`, `1606`, or `2753` | `Uninstall-Revit.ps1` — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
+| Revit uninstall fails with `1603`, `1606`, or `2753` | `Uninstall-Revit.ps1` — see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) |
 | AutoCAD uninstall fails with `1603` or `2753` | `Uninstall-AutoCAD.ps1` — same automated remediation |
 | Navisworks uninstall fails with `1603` or `2753` | `Uninstall-Navisworks.ps1` — same automated remediation |
 | AutoCAD still listed in Add/Remove Programs after a "successful" uninstall | `Uninstall-AutoCAD.ps1` — it also removes the two hidden MSI children |
@@ -214,22 +253,22 @@ Autodesk products don't uninstall as a single item. The core application, every 
 
 ```powershell
 # Preview only for the default year (2026) — lists matches, changes nothing:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ListOnly
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Revit.ps1 -ListOnly
 
 # Preview a specific year:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2024 -ListOnly
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Revit.ps1 -ProductYear 2024 -ListOnly
 
 # Interactive — prompts before each product and each residual folder:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2024
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Revit.ps1 -ProductYear 2024
 
 # Fully unattended and silent — closes Revit if open, no prompts:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2025 -StopRevit -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Revit.ps1 -ProductYear 2025 -StopRevit -Force
 
 # ALSO remove the year's Material Library packages (opt-in, bare switch):
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2026 -IncludeMaterialLibraries
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Revit.ps1 -ProductYear 2026 -IncludeMaterialLibraries
 
 # Core application only — skip add-ins and residual cleanup (needs -Command, see the note below):
-powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-Revit.ps1' -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false"
+powershell -ExecutionPolicy Bypass -Command "& '.\scripts\autodesk\Uninstall-Revit.ps1' -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false"
 ```
 
 **`-IncludeMaterialLibraries` is a switch — pass it bare, like `-Force`.** Not
@@ -250,7 +289,7 @@ Run `-ListOnly` first. It is the safety gate: it shows exactly what will be remo
 | `-ProductYear` | string | `2026` | Four-digit Revit release year to target (e.g. `2024`). Scopes the core match, add-in sweep, residual folders, the residual guard, and the self-elevation relaunch. Validated as four digits. |
 | `-IncludeAddins` | bool | `$true` | Also remove every product whose name references Revit **and** the target year (add-ins, content, exporters, DB Link, IFC, interop tools). Disable with `-IncludeAddins:$false`, which needs the `-Command` form. |
 | `-IncludeMaterialLibraries` | switch | off | **Opt-in.** Also remove Material Library packages matching the target year. Off by default because material libraries are commonly shared across products. |
-| `-NeutralizeBrokenCustomActions` | bool | `$true` | On `1603` + `Internal Error 2753`, automatically neutralize the broken custom action in a patched copy of the cached package, recache it (`/fv`), and retry — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md). Disable with `-NeutralizeBrokenCustomActions:$false`, which needs the `-Command` form. |
+| `-NeutralizeBrokenCustomActions` | bool | `$true` | On `1603` + `Internal Error 2753`, automatically neutralize the broken custom action in a patched copy of the cached package, recache it (`/fv`), and retry — see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). Disable with `-NeutralizeBrokenCustomActions:$false`, which needs the `-Command` form. |
 | `-RemoveResidualFiles` | bool | `$true` | After a successful uninstall, delete leftover Revit-`<year>`-specific folders (settings, journals, add-in manifests, RVT content, program folder). Disable with `-RemoveResidualFiles:$false`, which needs the `-Command` form. |
 | `-StopRevit` | switch | off | Terminate `Revit.exe` if running. Without it, the script aborts when Revit is open. |
 | `-ListOnly` | switch | off | Discover and print matches, then exit. No changes. |
@@ -265,7 +304,7 @@ Run `-ListOnly` first. It is the safety gate: it shows exactly what will be remo
 
 1. `msiexec.exe /x "C:\Windows\Installer\<cached>.msi" /qn /norestart` — the locally cached package (resolved via the Windows Installer COM API), which bypasses network-source resolution.
 2. `msiexec.exe /x {GUID} /qn /norestart` — the product code. Fully silent, deterministic.
-3. `msiexec.exe /x {GUID} … ROOTDRIVE=C:\ INSTALLDIR="…\Autodesk\Revit <year>"` — a last-resort directory-property override that clears the case where the MSI's own uninstall sequence composes a relative `INSTALLDIR` and dies with `Error 1606. Could not access network location Revit <year>\` (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)). Kept last because property overrides can themselves provoke error 2753 on some packages.
+3. `msiexec.exe /x {GUID} … ROOTDRIVE=C:\ INSTALLDIR="…\Autodesk\Revit <year>"` — a last-resort directory-property override that clears the case where the MSI's own uninstall sequence composes a relative `INSTALLDIR` and dies with `Error 1606. Could not access network location Revit <year>\` (see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)). Kept last because property overrides can themselves provoke error 2753 on some packages.
 4. `QuietUninstallString` — the vendor's own silent command, run directly.
 5. Raw `UninstallString` — for EXE uninstallers (Autodesk ODIS), a `--silent` variant is attempted first with the exact vendor command kept as an automatic fallback, so a wrong silent flag can never block the uninstall.
 
@@ -284,7 +323,7 @@ Every run writes a full transcript to `%TEMP%\Uninstall-Revit<year>_<timestamp>.
 
 ### Troubleshooting
 
-Stuck on exit `1603`, `1606`, or Internal Error `2753`? The script handles the two hard cases automatically: the relative-`INSTALLDIR` 1606 (directory-property override) and the damaged-custom-action 2753 (neutralize → recache → retry). See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for the full error-code map and the manual fallback routes.
+Stuck on exit `1603`, `1606`, or Internal Error `2753`? The script handles the two hard cases automatically: the relative-`INSTALLDIR` 1606 (directory-property override) and the damaged-custom-action 2753 (neutralize → recache → retry). See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the full error-code map and the manual fallback routes.
 
 ### Reinstalling Revit later
 
@@ -354,22 +393,22 @@ AutoCAD is harder to remove correctly than Revit, for three reasons this script 
 
 ```powershell
 # Preview only for the default year (2026) — lists matches, changes nothing:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ListOnly
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-AutoCAD.ps1 -ListOnly
 
 # Preview a specific year:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2025 -ListOnly
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-AutoCAD.ps1 -ProductYear 2025 -ListOnly
 
 # Interactive — prompts before each product and each residual folder:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2025
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-AutoCAD.ps1 -ProductYear 2025
 
 # Fully unattended and silent, closing AutoCAD if it is open:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2025 -StopAutoCAD -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-AutoCAD.ps1 -ProductYear 2025 -StopAutoCAD -Force
 
 # Full wipe including the release-scoped profile keys (opt-in, bare switch):
-powershell -ExecutionPolicy Bypass -File .\Uninstall-AutoCAD.ps1 -ProductYear 2026 -RemoveResidualRegistry -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-AutoCAD.ps1 -ProductYear 2026 -RemoveResidualRegistry -Force
 
 # Core application only — skip add-ins and residual cleanup (needs -Command, see the note below):
-powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-AutoCAD.ps1' -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false"
+powershell -ExecutionPolicy Bypass -Command "& '.\scripts\autodesk\Uninstall-AutoCAD.ps1' -ProductYear 2026 -IncludeAddins:$false -RemoveResidualFiles:$false"
 ```
 
 **`-RemoveResidualRegistry` and `-IncludeMaterialLibraries` are switches — pass them bare, like
@@ -486,25 +525,25 @@ Three further Navisworks-specific traps this script is built around:
 
 ```powershell
 # Preview only for the default year (2026), all editions — changes nothing:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ListOnly
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Navisworks.ps1 -ListOnly
 
 # Preview a specific year and edition:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2025 -Edition Manage -ListOnly
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Navisworks.ps1 -ProductYear 2025 -Edition Manage -ListOnly
 
 # Interactive — prompts before each product and each residual folder:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -Edition Manage
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Navisworks.ps1 -ProductYear 2026 -Edition Manage
 
 # Fully unattended and silent, closing Navisworks if it is open:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2025 -StopNavisworks -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Navisworks.ps1 -ProductYear 2025 -StopNavisworks -Force
 
 # ALSO remove the NWC exporters — this breaks Export to NWC from Revit/AutoCAD/3ds Max:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -IncludeExporters
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Navisworks.ps1 -ProductYear 2026 -IncludeExporters
 
 # Full wipe including the version-scoped profile keys (opt-in, bare switch):
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Navisworks.ps1 -ProductYear 2026 -RemoveResidualRegistry -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Navisworks.ps1 -ProductYear 2026 -RemoveResidualRegistry -Force
 
 # Keep the residual files (needs -Command, see the note below):
-powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-Navisworks.ps1' -ProductYear 2026 -RemoveResidualFiles:$false"
+powershell -ExecutionPolicy Bypass -Command "& '.\scripts\autodesk\Uninstall-Navisworks.ps1' -ProductYear 2026 -RemoveResidualFiles:$false"
 ```
 
 **`-IncludeExporters`, `-IncludeCoordinationIssuesAddin`, `-IncludeMaterialLibraries` and
@@ -569,7 +608,7 @@ Every run writes a full transcript to `%TEMP%\Uninstall-Navisworks<year>_<timest
 
 ### Troubleshooting
 
-Stuck on exit `1603` or Internal Error `2753`? The same automated chain the Revit and AutoCAD scripts use applies here — neutralize → recache → retry. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for the full error-code map and the manual fallback routes.
+Stuck on exit `1603` or Internal Error `2753`? The same automated chain the Revit and AutoCAD scripts use applies here — neutralize → recache → retry. See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the full error-code map and the manual fallback routes.
 
 ### Reinstalling the exporters
 
@@ -599,10 +638,13 @@ Reinstall-safe for the same reasons as the sibling scripts: products go through 
 
 Fully removes **pyRevit** and **pyRevit CLI** — clones, engines, Revit add-in manifests,
 Windows "installed programs" registrations, Start Menu entries, and `PATH` entries — then
-verifies that nothing is left.
+verifies that nothing is left. It never deletes your own extensions, and it never leaves the
+system drive unless told to.
 
 > Built and verified against a real pyRevit 6.4.0 removal on a machine where a
-> folder-deleting script had already left the install half-removed.
+> folder-deleting script had already left the install half-removed. The deletion fences were
+> added after an earlier version deleted a user's extension workspace on another drive; see
+> [The fences](#the-fences) and `tests\Test-PyRevitFences.ps1`.
 
 ### Why a dedicated pyRevit uninstaller
 
@@ -638,7 +680,7 @@ This script runs the shipped uninstallers **first**, then sweeps, then verifies.
 - **Config-aware.** Parses `pyRevit_config.ini` for clone paths before deleting it, catching clones installed outside the default location.
 - **Correct CLI verbs.** `revits killall`, `detach --all`, `clones forget --all`, `caches clear --all`, run while the CLI still exists.
 - **Non-destructive `PATH` editing** that preserves `REG_EXPAND_SZ` and never rewrites when there is nothing to change.
-- **Extensions backed up** to your Desktop before anything is deleted.
+- **Three deletion fences, inside the deletion function.** Your extensions are never deleted — not the folders registered in `pyRevit_config.ini`, not any `*.extension` folder, not the default `%APPDATA%\pyRevit\Extensions` (unless you pass `-RemoveExtensions`, which backs it up to the Desktop first). Nothing outside the system drive is touched unless you pass `-IncludeOtherDrives`, and then only a verified clone. A folder that merely has "pyrevit" in its name is reported and left alone.
 - **Elevation optional** — pyRevit's default installers are per-user; machine-wide items are explicitly reported as skipped rather than silently missed.
 - **Long-path and read-only tolerant** deletion, with drive-root guards.
 - **Dry-run mode** (`-DryRun`, aliased `-WhatIf`) and a final **CLEAN / NOT CLEAN** verification pass.
@@ -656,22 +698,29 @@ This script runs the shipped uninstallers **first**, then sweeps, then verifies.
 
 ```powershell
 # Preview only — reports every intended change, modifies nothing:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-PyRevit-Complete.ps1 -DryRun
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-PyRevit-Complete.ps1 -DryRun
 
 # Interactive — prompts before stopping Revit:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-PyRevit-Complete.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-PyRevit-Complete.ps1
 
 # Unattended:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-PyRevit-Complete.ps1 -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-PyRevit-Complete.ps1 -Force
 
-# Replace a stale clone but keep the CLI you manage clones with:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-PyRevit-Complete.ps1 -KeepCli
+# Replace a stale clone but keep the CLI you manage clones with (your extensions stay too):
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-PyRevit-Complete.ps1 -KeepCli
+
+# Everything, including the default Extensions folder (backed up to the Desktop first):
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-PyRevit-Complete.ps1 -Force -RemoveExtensions
+
+# Also remove a verified clone that lives on another drive:
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-PyRevit-Complete.ps1 -IncludeOtherDrives
 
 # Machine-wide install (*_admin_signed.exe) — run from an elevated PowerShell:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-PyRevit-Complete.ps1 -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-PyRevit-Complete.ps1 -Force
 ```
 
-Run `-DryRun` first, for the same reason `Uninstall-Revit.ps1` has `-ListOnly`.
+Run `-DryRun` first, for the same reason `Uninstall-Revit.ps1` has `-ListOnly`. The dry run
+prints the fences section first, so you see what will be protected before you see what would go.
 
 ### Parameters
 
@@ -680,6 +729,8 @@ Run `-DryRun` first, for the same reason `Uninstall-Revit.ps1` has `-ListOnly`.
 | `-DryRun` | switch | off | Report every intended change and modify nothing. Aliased to `-WhatIf`. |
 | `-Force` | switch | off | Skip the confirmation prompt before stopping Revit. **Unsaved Revit work is lost.** |
 | `-KeepCli` | switch | off | Leave pyRevit CLI installed and remove only pyRevit itself. Useful when you manage clones with the CLI and are only replacing the clone. |
+| `-RemoveExtensions` | switch | off | Also remove the default `%APPDATA%\pyRevit\Extensions` and `%PROGRAMDATA%\pyRevit\Extensions` folders, after backing them up to a timestamped folder on the Desktop. Without it they stay in place and the rest of the config folder is removed around them. Folders registered by path in `pyRevit_config.ini` stay regardless. |
+| `-IncludeOtherDrives` | switch | off | Also remove verified pyRevit clones found (through `pyRevit_config.ini` or the uninstall registry) on a drive other than `%SystemDrive%`. Extension areas are never removed, on any drive. |
 
 ### What it does
 
@@ -689,10 +740,10 @@ Ten phases, logged to `%TEMP%\pyrevit_uninstall_<timestamp>.log`.
 |---|---|---|
 | 0 | Host applications | Detects `Revit`, `pyrevit`, `pyrevit-telemetryserver`, `pyrevit-doctor`. Offers to stop them; aborts if you decline, since locked DLLs turn deletes into silent no-ops. |
 | 1 | Graceful detach | `pyrevit revits killall`, `detach --all`, `clones forget --all`, `caches clear --all` — run while the CLI still exists. |
-| 2 | Extensions backup | If a populated `Extensions` folder exists, copies it to a timestamped folder on your Desktop **before** anything is deleted, and lists what it found. Skipped silently when there is nothing to back up. |
+| 2 | User extensions | Lists the default `Extensions` folder and says it is being kept. With `-RemoveExtensions`, copies it to a timestamped folder on your Desktop **before** anything is deleted. Lists the extension paths registered in `pyRevit_config.ini`, which are protected either way. |
 | 3 | Registered installs | Searches all three uninstall hives, runs each `unins000.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`, and confirms the registration is retired. |
 | 4 | Add-in manifests | Removes `pyRevit*.addin` and loader DLLs from every Revit version and scope. |
-| 5 | Leftover folders | Sweeps whatever the uninstallers left behind, including the `%APPDATA%\pyRevit` config folder that Inno does not own. |
+| 5 | Leftover folders | Sweeps whatever the uninstallers left behind, including the `%APPDATA%\pyRevit` config folder that Inno does not own — with the kept `Extensions` folder carved out of it. Every candidate is classified and passed through the fences first; what they refuse is logged as `left in place [class] - reason`. |
 | 6 | Start Menu | Removes pyRevit shortcuts, user and all-users. |
 | 7 | Registry footprint | Removes pyRevit keys plus any registration that survived phase 3. |
 | 8 | `PATH` | Removes pyRevit entries from the user `PATH`, and from the machine `PATH` when elevated — otherwise it logs `Machine PATH: NOT CHECKED (needs elevation)`. Broadcasts `WM_SETTINGCHANGE`. |
@@ -710,7 +761,19 @@ Folders matching `*pyrevit*` directly under:
 %SystemDrive%\
 ```
 
-…plus any clone path found in `pyRevit_config.ini`.
+…plus any clone path under `[environment] clones` in `pyRevit_config.ini`, and the
+`InstallLocation` of every non-CLI registration — as *candidates*: each still has to pass the
+fences below.
+
+**Never swept**, wherever they are and whatever they are called:
+
+```
+every path under [core] userextensions in pyRevit_config.ini   (and everything inside it)
+every folder named *.extension or *.lib, and every folder that directly contains one
+%APPDATA%\pyRevit\Extensions and %PROGRAMDATA%\pyRevit\Extensions   (unless -RemoveExtensions)
+anything on a drive other than %SystemDrive% that is not under one of the roots above   (unless -IncludeOtherDrives, and then only a verified clone)
+anything under %USERPROFILE% or %SystemDrive%\ that is not a verified clone   (bin\ + pyrevitlib\)
+```
 
 Add-in manifests under:
 
@@ -734,9 +797,36 @@ HKLM\SOFTWARE\pyRevit  ·  HKLM\SOFTWARE\pyRevitLabs  (+ WOW6432Node)
 
 Things that are easy to get wrong, and how this script handles them.
 
-**Custom clone directories.** Before deleting `pyRevit_config.ini`, the script parses it for
-clone paths. A clone installed outside the default location is found by reading pyRevit's own
-configuration rather than by guessing folder names.
+**Custom clone directories.** Before deleting `pyRevit_config.ini`, the script reads it — by
+section and key, not by scanning for anything path-shaped. `[environment] clones` supplies
+clone candidates; `[core] userextensions` supplies the protected list. An earlier version
+scanned every line for drive-letter paths and treated each one containing "pyrevit" as a
+clone, which is how a user's extension workspace on a second drive (its path contained
+"IcZ PyRevit") was deleted.
+
+<a id="the-fences"></a>
+**The fences.** Three checks decide whether a folder may be deleted, and all three live inside
+`Remove-Tree`, so no call site can reach `Remove-Item -Recurse -Force` around them:
+
+| Fence | Rule |
+|---|---|
+| Extension | A path that is, or is inside, a `userextensions` entry; a folder named `*.extension` or `*.lib`; a folder that directly contains one; the default `Extensions` folders unless `-RemoveExtensions`. **Never deleted.** |
+| Drive | Outside pyRevit's own footprint roots (`%APPDATA%`, `%LOCALAPPDATA%`, `%LOCALAPPDATA%\Programs`, `%PROGRAMDATA%`, `%PROGRAMFILES%`, `%ProgramFiles(x86)%`, `%TEMP%`), nothing on a drive other than `%SystemDrive%` is deleted unless `-IncludeOtherDrives` — and then only a verified clone. The footprint roots are exempt so a redirected profile on `D:` still gets cleaned. |
+| Marker | Outside the footprint roots, a folder is deleted only if it is a verified clone: it holds `pyrevitlib\` plus `bin\` or a `pyRevitfile`. `C:\pyRevit-notes` is reported and left alone. |
+
+A folder that contains a protected subtree is not skipped wholesale: its other children are
+removed one by one and the protected part stays — that is how `%APPDATA%\pyRevit` loses its
+config file and caches while `Extensions` survives. Everything a fence keeps is listed under
+*left in place on purpose* in phase 9 and excluded from the verdict, so such a run still ends
+**CLEAN**. Paths are compared in their long form, because `%TEMP%` is often an 8.3 short name
+(`C:\Users\ICECRE~1\…`) and a protected root written one way must still match a candidate
+discovered the other way.
+
+`tests\Test-PyRevitFences.ps1` builds a throwaway fixture — a clone, the config folder, an
+unverified folder, and on a second drive letter (via `subst`) a registered extension workspace
+and a second clone — lifts the script's functions out by AST, and asserts all of the above
+including real deletions inside the fixture. Run it with `-ExpectDefective` against a pre-fix
+copy and it passes only if that copy would have deleted the workspace.
 
 **Inno relaunches itself.** `unins000.exe` copies itself to `%TEMP%\_iu*.tmp` and the original
 process exits immediately, so `Start-Process -Wait` returns before the uninstall has finished.
@@ -777,15 +867,17 @@ Get-ChildItem 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall' | ForE
 
 Then reinstall pyRevit — the leftover-installation prompt should not appear.
 
-If phase 2 backed anything up, your extensions are on your Desktop in
-`pyRevit_Extensions_Backup_<timestamp>`. Copy the `.extension` folders back into
-`%APPDATA%\pyRevit\Extensions` after reinstalling, or re-register them with
-`pyrevit extensions`. Extensions kept outside the clone directory and registered by path are
-untouched by the uninstall.
+Your extensions are where you left them: the default `%APPDATA%\pyRevit\Extensions` folder
+is kept in place, and folders registered by path in `pyRevit_config.ini` are never touched.
+The config file itself is gone, so re-register the by-path folders with
+`pyrevit extensions paths add <folder>` after reinstalling. If you ran with
+`-RemoveExtensions`, the default folder is on your Desktop in
+`pyRevit_Extensions_Backup_<timestamp>`; copy the `.extension` folders back after
+reinstalling.
 
 ### Troubleshooting
 
-[TROUBLESHOOTING.md](TROUBLESHOOTING.md) covers Autodesk MSI/ODIS failures and does not apply
+[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) covers Autodesk MSI/ODIS failures and does not apply
 to pyRevit. The pyRevit script's own failure modes:
 
 **`NOT CLEAN` with `needs-admin:` entries** — machine-wide items were skipped. Re-run from an
@@ -801,6 +893,16 @@ the installer's leftover-installation complaint.
 
 **Phase 1 logs `rejected by CLI`** — that verb is not available on your CLI version. Harmless;
 phases 3–8 do not depend on it.
+
+**Phase 5 logs `left in place [Unverified]`** for a folder you expected to go — it sits
+outside pyRevit's footprint roots and does not look like a clone (no `bin\` + `pyrevitlib\`).
+That is the marker fence doing its job; delete it by hand if it really is pyRevit's.
+`left in place [Clone] - outside C:` means a clone on another drive: re-run with
+`-IncludeOtherDrives`. `left in place [Extensions]` is never overridden.
+
+**Phase 5 logs `refusing to delete (...)`** with an `ERROR` level — a call site handed
+`Remove-Tree` a fenced path directly. That is a bug in the script, not a policy decision;
+please report the log.
 
 **Script won't start** — `-ExecutionPolicy Bypass` applies to that one process only and changes
 no machine setting. Prefer it over altering your execution policy.
@@ -831,6 +933,12 @@ Syntax-checked with the PowerShell 5.1 parser, then run end to end against a liv
 Reinstalling after a CLEAN verdict was not itself re-tested — but the orphaned registration
 that triggers the installer's leftover warning is verifiably gone, which is the condition the
 warning checks.
+
+The fences (2026-09-12) were verified three ways: `tests\Test-PyRevitFences.ps1` passes all
+44 assertions against the shipped script and, in `-ExpectDefective` mode, reproduces the
+deletion against the pre-fix copy; and a `-DryRun` on a machine with pyRevit 6.5.5, both CLIs
+and a `userextensions` entry pointing at a live development workspace reported that workspace
+as **PROTECTED** and the default `Extensions` folder as carved out.
 
 ---
 
@@ -920,22 +1028,22 @@ Four FortiClient-specific traps this script is built around:
 
 ```powershell
 # Preview the full census — every service, driver, package, device and rule. Changes nothing:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-FortiClient.ps1 -ListOnly
+powershell -ExecutionPolicy Bypass -File .\scripts\vendors\Uninstall-FortiClient.ps1 -ListOnly
 
 # Interactive removal, prompting before each step:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-FortiClient.ps1 -StopFortiClient
+powershell -ExecutionPolicy Bypass -File .\scripts\vendors\Uninstall-FortiClient.ps1 -StopFortiClient
 
 # Fully unattended, including the config hives and the saved VPN credentials:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-FortiClient.ps1 -StopFortiClient -RemoveResidualRegistry -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\vendors\Uninstall-FortiClient.ps1 -StopFortiClient -RemoveResidualRegistry -Force
 
 # Second pass after the reboot, to sweep the files the kernel was holding open:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-FortiClient.ps1 -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\vendors\Uninstall-FortiClient.ps1 -Force
 
 # Also remove the legacy 2016 Fortinet PPPoP WAN Adapter package:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-FortiClient.ps1 -IncludeLegacyPppop -StopFortiClient
+powershell -ExecutionPolicy Bypass -File .\scripts\vendors\Uninstall-FortiClient.ps1 -IncludeLegacyPppop -StopFortiClient
 
 # Turning a default-on removal OFF needs -Command, not -File (see the note below):
-powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-FortiClient.ps1' -RemoveDrivers:$false -StopFortiClient"
+powershell -ExecutionPolicy Bypass -Command "& '.\scripts\vendors\Uninstall-FortiClient.ps1' -RemoveDrivers:$false -StopFortiClient"
 ```
 
 **`-RemoveResidualRegistry` and `-IncludeLegacyPppop` are switches — pass them bare, like
@@ -1190,26 +1298,26 @@ Six Adobe-specific traps this script is built around:
 
 ```powershell
 # Preview the census — every product with its SAP code and classification. Changes nothing:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1 -ListOnly
+powershell -ExecutionPolicy Bypass -File .\scripts\vendors\Uninstall-Adobe.ps1 -ListOnly
 
 # Interactive: pick from a numbered menu, prompting before each step:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\vendors\Uninstall-Adobe.ps1
 
 # One product by SAP code, unattended:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1 -Product PHSP -StopAdobe -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\vendors\Uninstall-Adobe.ps1 -Product PHSP -StopAdobe -Force
 
 # Two products by name — -Product matches display names as well as SAP codes:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1 -Product Photoshop,Illustrator -StopAdobe -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\vendors\Uninstall-Adobe.ps1 -Product Photoshop,Illustrator -StopAdobe -Force
 
 # Every application, then a second pass to reclaim the shared runtimes:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1 -All -StopAdobe -Force
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1 -All -IncludeSharedComponents -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\vendors\Uninstall-Adobe.ps1 -All -StopAdobe -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\vendors\Uninstall-Adobe.ps1 -All -IncludeSharedComponents -Force
 
 # Full wipe including user presets, workspaces and the Camera Raw library:
-powershell -ExecutionPolicy Bypass -File .\Uninstall-Adobe.ps1 -All -IncludeSharedComponents -RemoveUserData -RemoveShellExtensions -RemoveResidualRegistry -StopAdobe -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\vendors\Uninstall-Adobe.ps1 -All -IncludeSharedComponents -RemoveUserData -RemoveShellExtensions -RemoveResidualRegistry -StopAdobe -Force
 
 # Turning the default-on removal OFF needs -Command, not -File (see the note below):
-powershell -ExecutionPolicy Bypass -Command "& '.\Uninstall-Adobe.ps1' -RemoveResidualFiles:$false -Product PHSP"
+powershell -ExecutionPolicy Bypass -Command "& '.\scripts\vendors\Uninstall-Adobe.ps1' -RemoveResidualFiles:$false -Product PHSP"
 ```
 
 **Every opt-in is a switch — pass them bare, like `-Force`.** Not `-RemoveUserData:$true`. This
@@ -1447,32 +1555,32 @@ Buckets are independent, so `-Scope Startup,Power` is a valid and useful run.
 
 ```powershell
 # The recommended first run. Full census with sizes and evidence, no changes, NO ELEVATION NEEDED:
-.\Remove-LegacyHardwareResidue.ps1 -ListOnly
+.\scripts\windows\Remove-LegacyHardwareResidue.ps1 -ListOnly
 
 # Just stop the dead vendor tasks firing at every logon. Fast and reversible:
-.\Remove-LegacyHardwareResidue.ps1 -Scope Startup
+.\scripts\windows\Remove-LegacyHardwareResidue.ps1 -Scope Startup
 
 # Full preview of the default run, showing every command that would be issued:
-.\Remove-LegacyHardwareResidue.ps1 -WhatIf
+.\scripts\windows\Remove-LegacyHardwareResidue.ps1 -WhatIf
 
 # The ASUS stack and the Intel graphics stack, including their phantom devnodes:
-.\Remove-LegacyHardwareResidue.ps1 -Scope Asus,Display -RemoveGhostDevices
+.\scripts\windows\Remove-LegacyHardwareResidue.ps1 -Scope Asus,Display -RemoveGhostDevices
 
 # Everything, non-interactive, including the vendor config hives:
-.\Remove-LegacyHardwareResidue.ps1 -Force -RemoveResidualRegistry
+.\scripts\windows\Remove-LegacyHardwareResidue.ps1 -Force -RemoveResidualRegistry
 
 # The reused-drive run: every previous build's phantom PCI/ACPI devices, old CPU nodes, disks,
 # volumes and monitors. Vendor stacks untouched:
-.\Remove-LegacyHardwareResidue.ps1 -Scope Platform -RemoveGhostDevices
+.\scripts\windows\Remove-LegacyHardwareResidue.ps1 -Scope Platform -RemoveGhostDevices
 
 # Which driver-store providers outside the catalogue have nothing bound to them:
-.\Remove-LegacyHardwareResidue.ps1 -Scope OtherVendors -ListOnly
+.\scripts\windows\Remove-LegacyHardwareResidue.ps1 -Scope OtherVendors -ListOnly
 
 # Second pass after the reboot, to sweep the files the kernel was holding open:
-.\Remove-LegacyHardwareResidue.ps1 -Force
+.\scripts\windows\Remove-LegacyHardwareResidue.ps1 -Force
 
 # Turning a default-on removal OFF needs -Command, not -File (see the note below):
-powershell -Command ".\Remove-LegacyHardwareResidue.ps1 -RemoveDriverPackages:`$false"
+powershell -Command ".\scripts\windows\Remove-LegacyHardwareResidue.ps1 -RemoveDriverPackages:`$false"
 ```
 
 `-ListOnly` is deliberately usable **unelevated**. The census reads registry hives, the driver
@@ -1665,22 +1773,22 @@ Two further fixes to the machinery itself:
 
 ```powershell
 # The recommended first run. What would change, and what is already done. NO ELEVATION NEEDED:
-.\Remove-WindowsBloat.ps1 -ListOnly
+.\scripts\windows\Remove-WindowsBloat.ps1 -ListOnly
 
 # The Recommended set, tweaks and apps, after a confirmation prompt:
-.\Remove-WindowsBloat.ps1
+.\scripts\windows\Remove-WindowsBloat.ps1
 
 # Exactly two tweaks, unattended:
-.\Remove-WindowsBloat.ps1 -Tweak DisableTelemetry,DisableBing -Force -Confirm:$false
+.\scripts\windows\Remove-WindowsBloat.ps1 -Tweak DisableTelemetry,DisableBing -Force -Confirm:$false
 
 # Every privacy and AI tweak, plus the Gaming group, no app removal (needs -Command, see the note):
-powershell -Command ".\Remove-WindowsBloat.ps1 -Group Privacy,AI,Gaming -RemoveApps:`$false"
+powershell -Command ".\scripts\windows\Remove-WindowsBloat.ps1 -Group Privacy,AI,Gaming -RemoveApps:`$false"
 
 # Recommended apps, but keep Clipchamp and To Do; also take the Xbox app and OneDrive:
-.\Remove-WindowsBloat.ps1 -KeepApps Clipchamp.Clipchamp,Microsoft.Todos -IncludeGamingApps -IncludeOneDrive
+.\scripts\windows\Remove-WindowsBloat.ps1 -KeepApps Clipchamp.Clipchamp,Microsoft.Todos -IncludeGamingApps -IncludeOneDrive
 
 # Put everything back:
-.\Remove-WindowsBloat.ps1 -Restore "C:\ProgramData\ADesk_Cleaner\WindowsBloat-backup_20260823_091500.json"
+.\scripts\windows\Remove-WindowsBloat.ps1 -Restore "C:\ProgramData\ADesk_Cleaner\WindowsBloat-backup_20260823_091500.json"
 ```
 
 ### Parameters
@@ -1830,26 +1938,26 @@ rights, and the run says plainly which rows it could not touch.
 
 ```powershell
 # Census. Every entry, what it is, and what turning it off would cost you:
-.\Clean-StartupApps.ps1
+.\scripts\windows\Clean-StartupApps.ps1
 
 # Turn off three specific things - matched on entry name, executable or app name:
-.\Clean-StartupApps.ps1 -Disable Discord,jusched,iTunesHelper
+.\scripts\windows\Clean-StartupApps.ps1 -Disable Discord,jusched,iTunesHelper
 
 # See exactly what a "disable everything optional" run would do:
-.\Clean-StartupApps.ps1 -DisableOptional -WhatIf
+.\scripts\windows\Clean-StartupApps.ps1 -DisableOptional -WhatIf
 
 # Actually DELETE every launcher, updater and tray icon, rather than leaving a
 # disabled row behind. Reversible from the backup it writes first:
-.\Clean-StartupApps.ps1 -RemoveOptional
+.\scripts\windows\Clean-StartupApps.ps1 -RemoveOptional
 
 # Delete the entries whose targets are already gone:
-.\Clean-StartupApps.ps1 -RemoveOrphans
+.\scripts\windows\Clean-StartupApps.ps1 -RemoveOrphans
 
 # Include logon scheduled tasks in the census:
-.\Clean-StartupApps.ps1 -IncludeScheduledTasks
+.\scripts\windows\Clean-StartupApps.ps1 -IncludeScheduledTasks
 
 # Put everything back:
-.\Clean-StartupApps.ps1 -Restore "$env:TEMP\StartupApps_20260906_101500.json"
+.\scripts\windows\Clean-StartupApps.ps1 -Restore "$env:TEMP\StartupApps_20260906_101500.json"
 ```
 
 ## `Clear-RevitCache.ps1` — Revit caches, without uninstalling anything
@@ -1922,19 +2030,19 @@ process guard already enforces. No model is touched; only the shortcuts to them.
 
 ```powershell
 # Preview every cache on the machine with sizes — changes nothing:
-powershell -ExecutionPolicy Bypass -File .\Clear-RevitCache.ps1 -ListOnly
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Clear-RevitCache.ps1 -ListOnly
 
 # Clear the safe caches for every year, prompting per location:
-powershell -ExecutionPolicy Bypass -File .\Clear-RevitCache.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Clear-RevitCache.ps1
 
 # One year, unattended, closing Revit and the accelerator if they are open:
-powershell -ExecutionPolicy Bypass -File .\Clear-RevitCache.ps1 -ProductYear 2026 -StopRevit -Force
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Clear-RevitCache.ps1 -ProductYear 2026 -StopRevit -Force
 
 # Empty the Home screen's Recent models page as well:
-powershell -ExecutionPolicy Bypass -File .\Clear-RevitCache.ps1 -ClearRecentFiles
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Clear-RevitCache.ps1 -ClearRecentFiles
 
 # ALSO clear cloud models — only projects untouched for 30+ days:
-powershell -ExecutionPolicy Bypass -File .\Clear-RevitCache.ps1 -IncludeCollaborationCache -OlderThanDays 30
+powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Clear-RevitCache.ps1 -IncludeCollaborationCache -OlderThanDays 30
 ```
 
 Run `-ListOnly` first, for the same reason the uninstallers have it.
@@ -2102,31 +2210,31 @@ It is a heuristic, not a progress bar. The authoritative item count is in Indexi
 
 ```powershell
 # What is configured now, and whether turbo is even writable on this build. No elevation, changes nothing:
-powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -Status
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Reset-SearchIndex.ps1 -Status
 
 # Which folders are inflating the item count. No elevation, changes nothing:
-powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -Analyze
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Reset-SearchIndex.ps1 -Analyze
 
 # The index is fine, it is just crawling — un-throttle it without discarding it:
-powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -TurboOnly
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Reset-SearchIndex.ps1 -TurboOnly
 
 # Full reset, with turbo and a live progress monitor:
-powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Reset-SearchIndex.ps1
 
 # Full reset on a dev machine: user libraries only, and write the owner-locked key:
-powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -Mode Classic -TakeOwnership
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Reset-SearchIndex.ps1 -Mode Classic -TakeOwnership
 
 # Watch a rebuild that is already running, without resetting anything:
-powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -Monitor
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Reset-SearchIndex.ps1 -Monitor
 
 # Put polite throttling back once the rebuild has finished:
-powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -RevertTurbo
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Reset-SearchIndex.ps1 -RevertTurbo
 
 # Recover from an interrupted reset that left the service stopped or disabled:
-powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -Repair
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Reset-SearchIndex.ps1 -Repair
 
 # Genuinely unattended needs BOTH switches — see the note below:
-powershell -ExecutionPolicy Bypass -File .\Reset-SearchIndex.ps1 -Force -Confirm:$false -NoMonitor
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\Reset-SearchIndex.ps1 -Force -Confirm:$false -NoMonitor
 ```
 
 ### Parameters
@@ -2191,10 +2299,10 @@ anything. There is no elevation, no registry access, and no vendor uninstaller i
 
 ```powershell
 # Preview only — lists every match, deletes nothing:
-powershell -ExecutionPolicy Bypass -File .\Clean-Directory.ps1 -RootPath "C:\Projects" -WhatIf
+powershell -ExecutionPolicy Bypass -File .\scripts\utility\Clean-Directory.ps1 -RootPath "C:\Projects" -WhatIf
 
 # Real run — lists matches, then requires typing YES:
-powershell -ExecutionPolicy Bypass -File .\Clean-Directory.ps1 -RootPath "C:\Projects"
+powershell -ExecutionPolicy Bypass -File .\scripts\utility\Clean-Directory.ps1 -RootPath "C:\Projects"
 ```
 
 ### Parameters
@@ -2226,17 +2334,17 @@ $FolderPatterns = @("__pycache__")
 
 ## Reference documentation
 
-[`Revit_Uninstall_Reference.md`](Revit_Uninstall_Reference.md) is the working teardown reference
+[`Revit_Uninstall_Reference.md`](docs/Revit_Uninstall_Reference.md) is the working teardown reference
 behind `Uninstall-Revit.ps1`: the twelve lessons that cost real debugging cycles (ODIS command
 quoting, StrictMode traps, MSI maintenance mode always running from the registered cache, the
 PowerShell 5.1 Windows Installer COM traps), the product-selection rule, the captured product
 codes from a verified removal, and the error-1606 / error-2753 root-cause analysis. Most of it
 generalizes to the AutoCAD and Navisworks scripts, which reuse the same MSI machinery.
 
-[TROUBLESHOOTING.md](TROUBLESHOOTING.md) is the operator-facing companion: the error-code map
+[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) is the operator-facing companion: the error-code map
 and the manual fallback routes when the automated remediation cannot proceed.
 
-[LESSONS_LEARNED.md](LESSONS_LEARNED.md) is the maintainer-facing one, and covers **all** the
+[LESSONS_LEARNED.md](docs/LESSONS_LEARNED.md) is the maintainer-facing one, and covers **all** the
 scripts rather than just Revit. Every uninstall error that forced an iteration — 1606 needing a
 second patch location, 1603/2753, the `/I` language-pack trap, `-WhatIf` failing to cross the
 UAC boundary and destroying a live install — is written up as symptom → root cause → **the
@@ -2247,9 +2355,9 @@ before committing a change, plus the drift that is currently known and unfixed.
 
 | Document | Answers |
 |---|---|
-| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | "My uninstall failed with code N. What now?" |
-| [Revit_Uninstall_Reference.md](Revit_Uninstall_Reference.md) | "What exactly does Revit register, and where?" |
-| [LESSONS_LEARNED.md](LESSONS_LEARNED.md) | "Why is the code written this way, and what breaks if I change it?" |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | "My uninstall failed with code N. What now?" |
+| [Revit_Uninstall_Reference.md](docs/Revit_Uninstall_Reference.md) | "What exactly does Revit register, and where?" |
+| [LESSONS_LEARNED.md](docs/LESSONS_LEARNED.md) | "Why is the code written this way, and what breaks if I change it?" |
 
 ---
 

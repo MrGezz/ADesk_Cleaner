@@ -88,9 +88,9 @@ cleanup, but effective when the automated chain cannot proceed.
    `{7346B4A0-2300-0510-0000-705C0D862004}`.
 4. Let it remove the registration and clean the broken cache entry.
 5. **Re-run the matching script** for that year, e.g.
-   `powershell -ExecutionPolicy Bypass -File .\Uninstall-Revit.ps1 -ProductYear 2023 -StopRevit -Force`
-   (or `.\Uninstall-AutoCAD.ps1 ... -StopAutoCAD -Force`, or
-   `.\Uninstall-Navisworks.ps1 ... -StopNavisworks -Force`).
+   `powershell -ExecutionPolicy Bypass -File .\scripts\autodesk\Uninstall-Revit.ps1 -ProductYear 2023 -StopRevit -Force`
+   (or `.\scripts\autodesk\Uninstall-AutoCAD.ps1 ... -StopAutoCAD -Force`, or
+   `.\scripts\autodesk\Uninstall-Navisworks.ps1 ... -StopNavisworks -Force`).
    The core now reports `1605` ("already gone") → success, so the run completes
    and residual cleanup finally proceeds.
 

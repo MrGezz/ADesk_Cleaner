@@ -7,6 +7,12 @@ setlocal
 :: for this process only, forwarding every argument unchanged:
 ::
 ::     Uninstall-PyRevit-Complete.cmd -DryRun
+::     Uninstall-PyRevit-Complete.cmd -KeepCli
+::     Uninstall-PyRevit-Complete.cmd -Force -RemoveExtensions
+::
+:: Your extensions are never deleted (the default Extensions folder stays unless
+:: -RemoveExtensions, folders registered in pyRevit_config.ini stay always), and
+:: nothing outside the system drive is touched unless -IncludeOtherDrives.
 ::
 :: Elevation is optional and the script does not self-elevate. Run it as the
 :: user who installed pyRevit; only a machine-wide install (*_admin_signed.exe)

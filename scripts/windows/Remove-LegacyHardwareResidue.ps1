@@ -1125,7 +1125,9 @@ try {
     if ($logDir -and -not (Test-Path $logDir)) {
         New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     }
-    Start-Transcript -Path $LogPath -Append | Out-Null
+    # Start-Transcript is ShouldProcess-aware; under -WhatIf it would preview
+    # instead of opening the log. The transcript is this script's own output.
+    Start-Transcript -Path $LogPath -Append -WhatIf:$false | Out-Null
     $script:TranscriptStarted = $true
 }
 catch {

@@ -39,6 +39,7 @@ scripts\utility\     Clean-Directory
 hub\                 Start-Hub.ps1 (the window) and catalog.json (what it lists)
 docs\                TROUBLESHOOTING.md, LESSONS_LEARNED.md, Revit_Uninstall_Reference.md
 tests\               Test-PyRevitFences.ps1 - regression test for the pyRevit deletion fences
+                     Test-TranscriptUnderWhatIf.ps1 - every script still writes its log under -WhatIf
 ```
 
 Each script sits beside its `.cmd` launcher in its `scripts\` folder. The usage lines in this

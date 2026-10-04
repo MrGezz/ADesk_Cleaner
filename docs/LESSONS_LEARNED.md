@@ -485,7 +485,7 @@ line is a bug that already happened once.
 | 1 | Common parameters relayed across UAC **and** `-WhatIf` re-checked in `$cmdLine` before `RunAs` | all four self-elevating uninstallers |
 | 2 | `; exit $LASTEXITCODE` present in the elevated command line | all four |
 | 3 | `-LogPath` resolved to absolute **before** elevation | all four |
-| 4 | `Start-Transcript -WhatIf:$false` | all four |
+| 4 | `Start-Transcript -WhatIf:$false`; `tests\Test-TranscriptUnderWhatIf.ps1` passes, and passes in `-ExpectDefective` mode against a pre-fix copy | every script that opens a transcript: Uninstall-Revit, Uninstall-AutoCAD, Uninstall-Navisworks, Uninstall-Adobe, Uninstall-FortiClient, Remove-WindowsBloat, Remove-LegacyHardwareResidue, Clean-StartupApps |
 | 5 | Operator-facing opt-ins are `[switch]`, never `[bool]` | all |
 | 6 | `$ConfirmPreference = 'None'` when `-Force` | all with `ShouldProcess` |
 | 7 | Autodesk uninstall commands never routed through `cmd /c` | three Autodesk |

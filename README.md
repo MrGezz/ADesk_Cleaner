@@ -19,6 +19,7 @@ and fully logged.
 | [`Remove-LegacyHardwareResidue.ps1`](scripts/windows/Remove-LegacyHardwareResidue.ps1) | **Every previous build's platform stack**, on a Windows install that moves from machine to machine — a catalogue of ASUS, Intel, AMD, NVIDIA, Gigabyte, MSI, ASRock, the laptop OEMs and their component vendors: driver packages, services, scheduled tasks, phantom devnodes and folders; plus the phantom PCI/ACPI/disk/monitor devnodes of old builds, and a discovery pass for vendors it has no profile for. **Refuses, per bucket, any vendor whose hardware is still present** | Required (self-elevates; `-ListOnly` does not) |
 | [`Remove-WindowsBloat.ps1`](scripts/windows/Remove-WindowsBloat.ps1) | **Windows' own bloat** — the pre-installed Store apps, telemetry, tips and ads, Copilot / Recall / Click To Do, Bing in search, Widgets — as a census-first run that **backs up every registry value it changes** and puts them all back with `-Restore` | Required (self-elevates; `-ListOnly` does not) |
 | [`Clean-StartupApps.ps1`](scripts/windows/Clean-StartupApps.ps1) | Not an uninstaller — audits **everything that launches itself at sign-in** across all four mechanisms (Run keys, Startup folders, packaged `StartupTask`s, logon scheduled tasks) and, for each one, says **what it actually is**. Resolves `Update.exe` to the app that owns it, `.lnk` files to their targets, and package task ids to their apps; then disables, removes or restores them | Optional (per-user surfaces need none; machine-wide ones do) |
+| [`Clean-AudioDevices.ps1`](scripts/windows/Clean-AudioDevices.ps1) | Not an uninstaller — removes the **audio endpoints Windows keeps for hardware and drivers that are gone**, so Settings → Sound → All sound devices lists only real devices; plus their ghost devnodes and dead per-app audio settings. **Never touches a connected, unplugged or user-disabled device.** Backs up first, opens the SYSTEM-owned keys with backup privileges instead of changing any ACL, and `-Restore` puts everything back | Required (self-elevates; `-ListOnly` does not) |
 | [`Clear-RevitCache.ps1`](scripts/autodesk/Clear-RevitCache.ps1) | Not an uninstaller — **keeps Revit installed** and clears its per-user caches: accelerator cache, web caches, journal history, and (opt-in) the cloud collaboration cache and the Home screen's Recent models page | None |
 | [`Reset-SearchIndex.ps1`](scripts/windows/Reset-SearchIndex.ps1) | Not an uninstaller — resets and rebuilds the **Windows Search** index, and lifts the self-throttling that otherwise makes the rebuild take days. Writes one owner-locked registry key that not even SYSTEM can write, then **restores its original ACL and owner** | Required (self-elevates; `-Status` and `-Analyze` do not) |
 | [`Clean-Directory.ps1`](scripts/utility/Clean-Directory.ps1) | Not an uninstaller — a recursive sweep for build junk (`*.bak`, `__pycache__`) under a directory you name | None |
@@ -34,12 +35,14 @@ Start-Hub.cmd        double-click this: one window to find, read about, preview 
 README.md            this manual
 scripts\autodesk\    Uninstall-Revit, Uninstall-AutoCAD, Uninstall-Navisworks, Uninstall-PyRevit-Complete, Clear-RevitCache
 scripts\vendors\     Uninstall-Adobe, Uninstall-FortiClient
-scripts\windows\     Remove-WindowsBloat, Remove-LegacyHardwareResidue, Clean-StartupApps, Reset-SearchIndex
+scripts\windows\     Remove-WindowsBloat, Remove-LegacyHardwareResidue, Clean-StartupApps, Clean-AudioDevices, Reset-SearchIndex
 scripts\utility\     Clean-Directory
 hub\                 Start-Hub.ps1 (the window) and catalog.json (what it lists)
 docs\                TROUBLESHOOTING.md, LESSONS_LEARNED.md, Revit_Uninstall_Reference.md
 tests\               Test-PyRevitFences.ps1 - regression test for the pyRevit deletion fences
                      Test-TranscriptUnderWhatIf.ps1 - every script still writes its log under -WhatIf
+                     Test-AudioEndpointClassifier.ps1 - which audio endpoints Clean-AudioDevices may remove
+                     Test-AudioRegistryMechanism.ps1 - its locked-key delete and restore, on a scratch replica (elevated)
 ```
 
 Each script sits beside its `.cmd` launcher in its `scripts\` folder. The usage lines in this
@@ -131,6 +134,10 @@ when it finishes, leaving only the transcript in `%TEMP%` to read.
 | Why is Windows Terminal (or Phone Link, or Teams) in Task Manager's startup list? | Its own app manifest declares a `StartupTask`. `Clean-StartupApps.ps1` says so per entry; such rows can be disabled but never removed |
 | A startup entry points at a program you already uninstalled | `Clean-StartupApps.ps1 -RemoveOrphans` |
 | Put the startup list back exactly as it was | `Clean-StartupApps.ps1 -Restore <backup.json>` |
+| Settings → Sound → All sound devices lists devices you no longer have | `Clean-AudioDevices.ps1` — census first, then `-Clean` |
+| The Sound list is full of "Disabled" entries from an old PC or an old driver | `Clean-AudioDevices.ps1 -Clean` — removes every not-present endpoint whose hardware or driver is gone |
+| Some audio entries came back after cleaning | Ports your current drivers still expose; Windows rebuilds them. See [Why some entries come back](#why-some-entries-come-back) |
+| Put the audio entries back | `Clean-AudioDevices.ps1 -Restore <manifest.json>` |
 | Stop Windows Update swapping your GPU or audio driver for an older one | `Remove-WindowsBloat.ps1 -Tweak ExcludeDriversFromWindowsUpdate` |
 | Turn off the telemetry, WAP-push and retail-demo services as well as the policies | `Remove-WindowsBloat.ps1 -Group Services` — every entry is backed up and reversible |
 | Windows 10 taskbar clutter: News and Interests, People bar, Cortana button, Ink Workspace | `Remove-WindowsBloat.ps1 -Group Taskbar` — those four entries are capped at build 19045, so they never fire on Windows 11 |
@@ -172,6 +179,10 @@ The three Autodesk uninstallers, `Uninstall-FortiClient.ps1`, `Uninstall-Adobe.p
 `Clean-StartupApps.ps1` shares the same contract, with `2` meaning every selected startup
 entry was already in the state you asked for, and `1` meaning a name you passed matched
 nothing.
+
+`Clean-AudioDevices.ps1` shares the contract too; `3010` means `pnputil` asked for a restart
+after removing a ghost devnode, and entries Windows rebuilds after a clean are reported, not
+counted as failures.
 
 A run in which you **declined** products at the prompts also exits `0` — declining is a
 deliberate choice, not a failure, so it does not earn exit `3`. Such a run says so explicitly
@@ -1960,6 +1971,160 @@ rights, and the run says plainly which rows it could not touch.
 # Put everything back:
 .\scripts\windows\Clean-StartupApps.ps1 -Restore "$env:TEMP\StartupApps_20260906_101500.json"
 ```
+
+## `Clean-AudioDevices.ps1` — the Sound settings list, without the ghosts
+
+Settings → System → Sound → All sound devices lists every audio endpoint Windows has ever built,
+and shows the ones that are no longer present as **Disabled** (Disconnected on some builds). On
+an install carried from machine to machine, or through a few audio drivers, most of that list is
+ghosts: the machine this was written on listed 62 entries, of which 11 were real. Windows has no
+button to remove them.
+
+This script removes the dead ones and never touches a device that is connected, unplugged or
+disabled by you — SteelSeries Sonar's virtual devices, a monitor's HDMI audio, the motherboard's
+jacks and paired Bluetooth earbuds all stay.
+
+### What it removes, and what it never touches
+
+Each endpoint is a key under `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\{Render|Capture}`.
+What happens to it is decided by its state and its parent device, never by its name:
+
+| Endpoint | Parent device | Result |
+|---|---|---|
+| Active, disabled by you, or unplugged | any | **Kept** |
+| Not present | no longer exists at all | **Removed** — *orphaned* |
+| Not present | built-in (`HDAUDIO`, `INTELAUDIO`, `PCI`, `ACPI`, carrying the "this PC" container) | **Removed** |
+| Not present | on USB, Bluetooth or a software bus (`ROOT`, `SW`, `SWD`) and still there | **Kept** — not present only means not connected |
+| Not present | a Thunderbolt dock, an eGPU or anything else with its own container | **Kept** |
+| anything malformed, or a bus the script does not recognise | — | **Kept**, and reported |
+
+Only the low four bits of `DeviceState` are read; Windows sets undocumented high bits that mean
+nothing here.
+
+Two more kinds of residue go by default:
+
+* the **ghost devnodes** (`SWD\MMDEVAPI\...`) of the endpoints it removed — never any others;
+* **per-app audio settings** (each app's volume and chosen output, per device) that point at
+  built-in hardware no longer present. USB and Bluetooth entries are always kept.
+  `-SkipAppSettings` leaves them all alone.
+
+Driver packages and phantom PCI devices of old hardware are not this script's job — see
+`Remove-LegacyHardwareResidue.ps1 -Scope Platform,Audio`.
+
+### Why some entries come back
+
+Windows' endpoint builder creates an endpoint for **every port the current drivers expose**,
+each time the audio service starts — whether anything is plugged into it or not. A not-present
+endpoint on such a port is rebuilt (under a new id) right after it is removed. The census labels
+these `port-still-exposed`; the other labels say why an entry is dead for good:
+
+| Label | Meaning |
+|---|---|
+| `orphaned` | its hardware is gone |
+| `interface-gone` | the driver interface it was built from is no longer enabled (an old driver or mode) |
+| `duplicate` | a live endpoint already holds the same port |
+| `no-interface-recorded` | it records no driver interface and was built under a driver the device no longer runs |
+| `port-still-exposed` | the current driver still exposes this port — **Windows rebuilds it**. An endpoint that records no interface but carries the name of the driver its device runs now counts too |
+
+On the machine this was written on, Windows rebuilt 16 of 42: the four HDMI outputs of the
+motherboard's AMD audio, two unused NVIDIA outputs, and ten Realtek front/rear jack inputs.
+A clean removes them all and then reports, by name, what Windows rebuilt. `-KeepExposedPorts`
+leaves the exposed ports alone. If the rebuilt entries are the motherboard's HDMI/DisplayPort
+outputs (AMD High Definition Audio Device) and you never take sound from them, disabling that
+device in Device Manager lets a later run remove them for good.
+
+### The keys Administrators cannot delete
+
+These keys belong to SYSTEM; only the two audio services and TrustedInstaller may delete them.
+An elevated administrator holds read and set-value rights only, so `Remove-Item` is denied.
+
+The script does **not** take ownership. .NET's `SetAccessControl` pushes inheritable ACEs down
+to every subkey and fails part-way on subkeys an administrator cannot rewrite, which can leave a
+weakened ACL behind. Instead each key is opened with backup semantics (`SeBackupPrivilege` +
+`SeRestorePrivilege`, `REG_OPTION_BACKUP_RESTORE`) and deleted with `NtDeleteKey`, deepest
+first. **No ACL is ever changed**, so an interrupted run cannot leave a weakened key behind. The
+deleter refuses anything that is not one endpoint key directly under `Render` or `Capture`.
+
+The audio services are stopped while keys are deleted — a running endpoint builder writes them
+back — so expect **about ten seconds without sound**. While they are down, Ctrl+C is read as
+input rather than breaking the run, an exit handler starts both services if the script ends any
+other orderly way, and the services are started again in a `finally` block with retries. If a
+window is closed mid-run, run `sc start AudioEndpointBuilder` and then `sc start Audiosrv` from an
+elevated prompt.
+
+### Backup and restore
+
+Before anything is touched, a run writes `%TEMP%\AudioDevices_<yyyyMMdd_HHmmss>\`:
+
+```
+endpoints\<Flow>_<Guid>.hiv   "reg save" of each endpoint key - values, subkeys AND security descriptors
+endpoints\<Flow>_<Guid>.reg   "reg export" of the same key, for reading
+appsettings.reg               the per-app entries, for reading or a manual "reg import"
+manifest.json                 what was removed; the per-app values -Restore writes back
+```
+
+Every file is verified before the first deletion; a backup that does not verify ends the run
+with nothing changed. `-Restore <manifest.json>` recreates each endpoint key that is missing now
+from its hive — owner and ACL included — and each per-app entry that is missing now. It refuses a
+manifest written on another computer, one naming a file outside its own folder, and one naming a
+key that is not an audio endpoint. Ghost devnodes are not restored; Windows makes them again for
+the restored keys. If Windows has rebuilt an endpoint for the same port since the clean, it may
+discard the restored copy once the audio services restart; the run lists those by name, and they
+are not failures.
+
+### The launcher
+
+`Clean-AudioDevices.cmd` works like the other launchers: with arguments it forwards them; with
+none it offers a census, a clean, a clean that keeps exposed ports, and a restore, then asks
+about per-app settings and a preview, and shows the exact command before anything runs. Every
+option except the census runs elevated in a new window that stays open.
+
+### Usage
+
+```powershell
+# Census: every endpoint, its label, and what -Clean would do. NO ELEVATION NEEDED:
+.\scripts\windows\Clean-AudioDevices.ps1
+
+# The exact plan of a clean, changing nothing:
+.\scripts\windows\Clean-AudioDevices.ps1 -Clean -WhatIf
+
+# Back up, then remove every not-present endpoint the rules select:
+.\scripts\windows\Clean-AudioDevices.ps1 -Clean
+
+# The same, keeping the ports the current drivers still expose and the per-app settings:
+.\scripts\windows\Clean-AudioDevices.ps1 -Clean -KeepExposedPorts -SkipAppSettings
+
+# Put back everything one run removed:
+.\scripts\windows\Clean-AudioDevices.ps1 -Restore "$env:TEMP\AudioDevices_20261005_101500\manifest.json"
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-ListOnly` | switch | on when neither `-Clean` nor `-Restore` is given | Census only. Changes nothing, needs no elevation |
+| `-Clean` | switch | off | Remove the selected endpoints, their ghost devnodes and dead per-app settings |
+| `-KeepExposedPorts` | switch | off | With `-Clean`: keep `port-still-exposed` endpoints |
+| `-SkipAppSettings` | switch | off | With `-Clean`: leave per-app audio settings alone |
+| `-Restore` | string | — | A `manifest.json` from an earlier run |
+| `-CreateRestorePoint` | switch | off | System Restore point first; Windows refuses a second one within 24 hours, which is reported, not failed |
+| `-Force` | switch | off | Skip the confirmation prompt |
+| `-LogPath` | string | `%TEMP%\AudioDevices_<stamp>.log` | Transcript |
+| `-BackupPath` | string | `%TEMP%\AudioDevices_<stamp>` | Backup folder; one that already holds a manifest is refused |
+
+`-KeepExposedPorts` and `-SkipAppSettings` without `-Clean`, and `-Clean` with `-Restore`, are
+refused rather than ignored.
+
+### Notes and limitations
+
+* Apps that were playing during the restart — SteelSeries Sonar included — may need restarting.
+* Per-app counts drift: apps add entries as they play sound, so the census count changes between
+  runs.
+* `tests\Test-AudioEndpointClassifier.ps1` (no elevation) covers the removal rules, the command
+  line, the backup, the restore checks and a read-only live census;
+  `tests\Test-AudioRegistryMechanism.ps1` (elevated) proves the locked-key delete and restore on a
+  scratch replica with the real key's owner and ACL. Both have an `-ExpectDefective` mode that
+  must fail.
 
 ## `Clear-RevitCache.ps1` — Revit caches, without uninstalling anything
 

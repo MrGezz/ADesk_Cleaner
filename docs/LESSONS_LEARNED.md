@@ -330,6 +330,48 @@ when the pre-fix copy WOULD have deleted the workspace.
 > **Rule: never delete on the strength of a name. Classify by content and
 > location, and put the classification inside the deletion function.**
 
+### E8. The key Administrators cannot delete, and the entry Windows rebuilds
+
+`Clean-AudioDevices.ps1` deletes audio endpoint keys under
+`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\{Render|Capture}`. They are owned
+by SYSTEM; only the `Audiosrv` and `AudioEndpointBuilder` services and TrustedInstaller may delete
+them, and an elevated administrator holds SetValue + ReadKey. `Remove-Item` is denied.
+
+The obvious fix - take ownership, grant Administrators, delete - was rejected before it was
+written. .NET's `RegistryKey.SetAccessControl` calls `SetSecurityInfo`, which pushes inheritable
+ACEs down to every existing subkey and fails part-way on subkeys an administrator cannot
+`WRITE_DAC`, leaving a half-rewritten ACL behind on a system key. Instead every key in the subtree
+is opened with `REG_OPTION_BACKUP_RESTORE` under `SeBackupPrivilege` + `SeRestorePrivilege` -
+which grants `KEY_READ`, `DELETE` and `KEY_WRITE` whatever the ACL says - and deleted by handle
+with `NtDeleteKey`, deepest first. No ACL is modified at any point. The backup is a `reg save`
+hive, which keeps each key's security descriptor; the restore creates the key with backup
+semantics and loads the hive with `RegRestoreKey` **through the same handle**. `reg restore`
+cannot do it: reg.exe re-opens the new key ACL-checked, and a key created under `Render` inherits
+an ACL that denies administrators write access. Both directions were proven on a scratch replica
+carrying the real key's owner and ACL (`tests\Test-AudioRegistryMechanism.ps1`): values
+byte-identical, owner and DACL exact.
+
+Two facts decide what a delete achieves:
+
+- `pnputil /remove-device` on an endpoint's `SWD\MMDEVAPI\...` devnode removes the devnode only;
+  the Settings row comes from the MMDevices key.
+- The endpoint builder creates an endpoint for every port of every **enabled** audio interface
+  at each service start. A not-present endpoint on an interface that is still enabled, and that
+  no live endpoint holds, comes straight back under a new id. Comparing each endpoint's recorded
+  interfaces with the enabled list predicts it; the run reports what was rebuilt rather than
+  calling it a failure.
+- The prediction missed ten on the first live run: Realtek's front/rear jack endpoints record no
+  interface at all, yet the driver exposes them and Windows rebuilt every one. What separated
+  them from the five that stayed gone was the driver name the endpoint carries - the device's
+  current driver, versus the generic one it ran before. The report after the restart is what
+  caught it; a prediction is not a measurement.
+- Restore runs into the same rule from the other side: after the services restart, the endpoint
+  builder discards a restored endpoint whose port a newer, rebuilt endpoint already holds. Verify
+  a restore before the restart, and report what Windows discards afterwards as information.
+
+> **Rule: when Windows protects a key from administrators, read and delete it with backup
+> semantics; never rewrite its ACL to get in.**
+
 ---
 
 ## F. Windows PowerShell 5.1 traps
@@ -384,6 +426,16 @@ when the pre-fix copy WOULD have deleted the workspace.
 - **`[Environment]::SetEnvironmentVariable` corrupts `PATH`** — see the README
   section; it returns the *expanded* value and always writes `REG_SZ`, baking
   `%SystemRoot%` into a literal and downgrading the value type.
+
+- **`Get-Acl -LiteralPath` fails on EVERY registry key in Windows PowerShell 5.1.** It reports
+  `Cannot find path 'HKEY_...'` for keys that exist, braces or not; `Get-Acl -Path` and
+  `RegistryKey.GetAccessControl()` work. In a test harness it made a fixture look missing, and the
+  next step then deleted the fixture it was meant to inspect.
+- **A native command's stderr under `2>&1` throws when `$ErrorActionPreference = 'Stop'`.**
+  Windows PowerShell 5.1 turns each stderr line into an ErrorRecord and the first one is
+  terminating - before `$LASTEXITCODE` can be read, so the failure's own exit code is lost.
+  `reg.exe` writes "Access is denied." to stderr. Run native tools through a helper that sets
+  `$ErrorActionPreference = 'Continue'` locally (`Invoke-NativeCommand` in Clean-AudioDevices).
 
 ---
 
@@ -485,7 +537,7 @@ line is a bug that already happened once.
 | 1 | Common parameters relayed across UAC **and** `-WhatIf` re-checked in `$cmdLine` before `RunAs` | all four self-elevating uninstallers |
 | 2 | `; exit $LASTEXITCODE` present in the elevated command line | all four |
 | 3 | `-LogPath` resolved to absolute **before** elevation | all four |
-| 4 | `Start-Transcript -WhatIf:$false`; `tests\Test-TranscriptUnderWhatIf.ps1` passes, and passes in `-ExpectDefective` mode against a pre-fix copy | every script that opens a transcript: Uninstall-Revit, Uninstall-AutoCAD, Uninstall-Navisworks, Uninstall-Adobe, Uninstall-FortiClient, Remove-WindowsBloat, Remove-LegacyHardwareResidue, Clean-StartupApps |
+| 4 | `Start-Transcript -WhatIf:$false`; `tests\Test-TranscriptUnderWhatIf.ps1` passes, and passes in `-ExpectDefective` mode against a pre-fix copy | every script that opens a transcript: Uninstall-Revit, Uninstall-AutoCAD, Uninstall-Navisworks, Uninstall-Adobe, Uninstall-FortiClient, Remove-WindowsBloat, Remove-LegacyHardwareResidue, Clean-StartupApps, Clean-AudioDevices |
 | 5 | Operator-facing opt-ins are `[switch]`, never `[bool]` | all |
 | 6 | `$ConfirmPreference = 'None'` when `-Force` | all with `ShouldProcess` |
 | 7 | Autodesk uninstall commands never routed through `cmd /c` | three Autodesk |
@@ -512,6 +564,11 @@ line is a bug that already happened once.
 | 28 | `pyRevit_config.ini` is read by section and key; `userextensions` paths are protected and are never candidates | Uninstall-PyRevit-Complete |
 | 29 | Paths that cross a guard are compared in long form — an 8.3 `%TEMP%` and a long `Get-ChildItem` result are the same folder | Uninstall-PyRevit-Complete |
 | 30 | `tests\Test-PyRevitFences.ps1` passes, and passes in `-ExpectDefective` mode against the pre-fix copy | Uninstall-PyRevit-Complete |
+| 31 | Audio endpoint removal is decided by `DeviceState & 0xF`, the parent's bus and its ContainerID - never by a name; anything malformed or unknown is kept | Clean-AudioDevices |
+| 32 | Keys administrators cannot delete are opened with backup semantics and deleted with `NtDeleteKey`; no ACL is ever rewritten to get in | Clean-AudioDevices |
+| 33 | The audio services are restarted under three layers: Ctrl+C read as input, an engine-exit handler, and a `finally` with retries | Clean-AudioDevices |
+| 34 | Per-app pruning addresses `HKEY_USERS\<TargetSid>`, relayed across elevation - never HKCU | Clean-AudioDevices |
+| 35 | Ghost devnodes are removed only for confirmed deletions, never from the census plan; `tests\Test-AudioEndpointClassifier.ps1` and `tests\Test-AudioRegistryMechanism.ps1` pass, and fail in `-ExpectDefective` mode | Clean-AudioDevices |
 
 ### Known outstanding drift
 

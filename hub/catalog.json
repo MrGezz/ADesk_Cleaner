@@ -4,7 +4,7 @@
   "groups": [
     { "id": "autodesk", "name": "Autodesk & Revit", "blurb": "Revit, AutoCAD, Navisworks, pyRevit, and Revit's caches" },
     { "id": "vendors",  "name": "Other vendors",    "blurb": "Adobe Creative Cloud, Fortinet FortiClient" },
-    { "id": "windows",  "name": "Windows",          "blurb": "Bloat, legacy hardware residue, startup apps, the Search index" },
+    { "id": "windows",  "name": "Windows",          "blurb": "Bloat, legacy hardware residue, startup apps, the Search index, ghost audio devices" },
     { "id": "utility",  "name": "Utility",          "blurb": "General-purpose cleanup" }
   ],
   "scripts": [
@@ -128,6 +128,17 @@
       "risk": "medium",
       "preview": ["-Status"],
       "logPattern": ""
+    },
+    {
+      "id": "clean-audiodevices",
+      "name": "Clean audio devices",
+      "file": "scripts/windows/Clean-AudioDevices.ps1",
+      "group": "windows",
+      "summary": "Not-present audio endpoints from previous hardware and drivers, their ghost devnodes and dead per-app audio settings. Census first; backup and restore.",
+      "elevation": "self",
+      "risk": "medium",
+      "preview": ["-ListOnly"],
+      "logPattern": "AudioDevices_*.log"
     },
     {
       "id": "clean-directory",

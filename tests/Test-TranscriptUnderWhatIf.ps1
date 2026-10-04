@@ -14,9 +14,9 @@
     found in the parsed AST and must carry -WhatIf:$false.
 
     Live - the scripts that run unelevated with -ListOnly (Clean-StartupApps,
-    Remove-LegacyHardwareResidue, Remove-WindowsBloat) are started in a fresh
-    Windows PowerShell 5.1 with -ListOnly -WhatIf. Every log path the run
-    announces must exist, must have been written during this run, and must be
+    Remove-LegacyHardwareResidue, Remove-WindowsBloat, Clean-AudioDevices) are
+    started in a fresh Windows PowerShell 5.1 with -ListOnly -WhatIf. Every log
+    path the run announces must exist, must have been written during this run, and must be
     a PowerShell transcript. The five uninstallers always self-elevate, so
     only the static half covers them.
 
@@ -44,7 +44,7 @@
 
 .EXAMPLE
     .\tests\Test-TranscriptUnderWhatIf.ps1
-    Static check over scripts\, live check of the three unelevated scripts.
+    Static check over scripts\, live check of the four unelevated scripts.
     Exit code 0 = all assertions hold.
 
 .EXAMPLE
@@ -68,7 +68,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 
-$LiveNames = @('Clean-StartupApps.ps1', 'Remove-LegacyHardwareResidue.ps1', 'Remove-WindowsBloat.ps1')
+$LiveNames = @('Clean-StartupApps.ps1', 'Remove-LegacyHardwareResidue.ps1', 'Remove-WindowsBloat.ps1', 'Clean-AudioDevices.ps1')
 
 # --- locate the scripts under test ------------------------------------------
 # -File cannot bind an array: "a","b" arrives as one string, so split it here.

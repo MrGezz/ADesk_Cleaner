@@ -19,6 +19,9 @@
     Every script keeps its own console window open until you press Enter, so
     its output, its prompts and its exit code are all there to read.
 
+    If a button or list fails - a file it opens is missing, say - the reason
+    appears in the status bar at the bottom and the window stays open.
+
     Light and dark themes: the toggle in the header switches live and the choice
     is remembered in %LOCALAPPDATA%\ADeskCleaner\hub-settings.json. On first run
     the hub follows the Windows app theme.
@@ -726,6 +729,46 @@ function Add-ParameterRow {
 
 function Set-Status { param([string]$Text) $script:Ui.TxtStatus.Text = $Text }
 
+# An exception thrown in an event handler escapes ShowDialog() and ends the
+# script, and the hub runs with its console hidden, so the window just
+# vanishes. Under $ErrorActionPreference = 'Stop' that covers every error a
+# cmdlet in a handler writes, not only the terminating ones. Two layers keep
+# the window open and put the reason in the status bar instead:
+#
+#   Invoke-Handler - every Add_* handler is one call to it, so the report names
+#     the control. It also covers an event raised by a PowerShell statement (a
+#     property set such as SelectedIndex = 0 during start-up): that handler's
+#     error comes back to the statement and never reaches the dispatcher.
+#   Dispatcher.UnhandledException, registered in Initialize-Window - the net
+#     for whatever reaches the message loop anyway, such as a handler added
+#     without Invoke-Handler.
+#
+# tests\Test-HubHandlerErrors.ps1 checks both; -SelfTest fails on any handler
+# error it provokes.
+function Write-HandlerError {
+    param([string]$Label, $Err)
+    $script:HandlerErrors++
+    try {
+        $rec = $null
+        if ($Err -is [System.Management.Automation.ErrorRecord]) { $rec = $Err }
+        elseif ($Err -is [System.Management.Automation.IContainsErrorRecord]) { $rec = $Err.ErrorRecord }
+        $msg = $(if ($rec) { $rec.Exception.Message } else { "$($Err.Message)" })
+        $at  = $(if ($rec -and $rec.InvocationInfo -and $rec.InvocationInfo.ScriptLineNumber) { ' (line {0})' -f $rec.InvocationInfo.ScriptLineNumber } else { '' })
+        $text = '{0} failed: {1}{2}' -f $Label, $msg, $at
+    } catch {
+        $text = '{0} failed.' -f $Label
+    }
+    $script:LastHandlerError = $text
+    # Before the window is built there is no status bar to write to.
+    try { Set-Status $text }
+    catch { try { [void][System.Windows.MessageBox]::Show($text, 'ADesk Cleaner', 'OK', 'Error') } catch { } }
+}
+
+function Invoke-Handler {
+    param([string]$Label, [scriptblock]$Action)
+    try { & $Action } catch { Write-HandlerError $Label $_ }
+}
+
 function Update-CommandPreview {
     if (-not $script:Current) { $script:Ui.TxtCommand.Text = ''; return }
     try {
@@ -803,11 +846,12 @@ function Show-Script {
     # Any edit to the form refreshes the command line.
     foreach ($ctl in $script:ParamControls.Values) {
         if ($ctl -is [System.Windows.Controls.CheckBox]) {
-            $ctl.Add_Checked({ Update-CommandPreview }); $ctl.Add_Unchecked({ Update-CommandPreview })
+            $ctl.Add_Checked({ Invoke-Handler 'The parameter form' { Update-CommandPreview } })
+            $ctl.Add_Unchecked({ Invoke-Handler 'The parameter form' { Update-CommandPreview } })
         } elseif ($ctl -is [System.Windows.Controls.ComboBox]) {
-            $ctl.Add_SelectionChanged({ Update-CommandPreview })
+            $ctl.Add_SelectionChanged({ Invoke-Handler 'The parameter form' { Update-CommandPreview } })
         } else {
-            $ctl.Add_TextChanged({ Update-CommandPreview })
+            $ctl.Add_TextChanged({ Invoke-Handler 'The parameter form' { Update-CommandPreview } })
         }
     }
     Update-CommandPreview
@@ -856,9 +900,25 @@ function Start-CurrentScript {
     }
 }
 
+# The Dark mode tick: apply the theme and remember it.
+function Update-Theme {
+    $name = $(if ($script:Ui.ChkDark.IsChecked) { 'dark' } else { 'light' })
+    Set-Theme $name
+    $script:Settings.theme = $name
+    Save-Settings $script:Settings
+    Set-Status ('{0} theme. Remembered in {1}.' -f $(if ($name -eq 'dark') { 'Dark' } else { 'Light' }), $script:SettingsPath)
+}
+
 function Initialize-Window {
     $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
     $script:Window = [System.Windows.Markup.XamlReader]::Load($reader)
+    # The net under Invoke-Handler: an exception that reaches the message loop
+    # is reported and marked handled, so ShowDialog() carries on.
+    $script:Window.Dispatcher.Add_UnhandledException({
+        param($src, $e)
+        $e.Handled = $true
+        Write-HandlerError 'A window event' $e.Exception
+    })
     $script:Ui = @{}
     foreach ($n in 'TxtTitle','TxtTagline','ChkDark','BtnReadme','BtnLogs','TxtSearch','LstGroups','TxtListHeading','LstScripts',
                    'TxtName','TxtFile','PnlBadges','TxtSynopsis','ExpDescription','TxtDescription','PnlParams','LstLogs','TxtNoLogs',
@@ -877,14 +937,8 @@ function Initialize-Window {
     $initial = $(if ($script:Settings.theme) { $script:Settings.theme } else { Get-SystemTheme })
     Set-Theme $initial
     $ui.ChkDark.IsChecked = ($script:Theme -eq 'dark')
-    $applyTheme = {
-        $name = $(if ($script:Ui.ChkDark.IsChecked) { 'dark' } else { 'light' })
-        Set-Theme $name
-        $script:Settings.theme = $name
-        Save-Settings $script:Settings
-        Set-Status ('{0} theme. Remembered in {1}.' -f $(if ($name -eq 'dark') { 'Dark' } else { 'Light' }), $script:SettingsPath)
-    }
-    $ui.ChkDark.Add_Checked($applyTheme); $ui.ChkDark.Add_Unchecked($applyTheme)
+    $ui.ChkDark.Add_Checked({ Invoke-Handler 'Dark mode' { Update-Theme } })
+    $ui.ChkDark.Add_Unchecked({ Invoke-Handler 'Dark mode' { Update-Theme } })
 
     # Groups: "All" first, then the catalogue order.
     $all = New-Object System.Windows.Controls.ListBoxItem
@@ -904,27 +958,28 @@ function Initialize-Window {
         $ui.LstGroups.Items.Add($item) | Out-Null
     }
 
-    $ui.LstGroups.Add_SelectionChanged({ Update-ScriptList })
-    $ui.TxtSearch.Add_TextChanged({ Update-ScriptList })
-    $ui.LstScripts.Add_SelectionChanged({
+    $ui.LstGroups.Add_SelectionChanged({ Invoke-Handler 'The group list' { Update-ScriptList } })
+    $ui.TxtSearch.Add_TextChanged({ Invoke-Handler 'Search' { Update-ScriptList } })
+    $ui.LstScripts.Add_SelectionChanged({ Invoke-Handler 'The script list' {
         $sel = $script:Ui.LstScripts.SelectedItem
         if ($sel -and $sel.Tag) { Show-Script $sel.Tag }
-    })
-    $ui.LstLogs.Add_MouseDoubleClick({
+    } })
+    $ui.LstLogs.Add_MouseDoubleClick({ Invoke-Handler 'Recent logs' {
         $sel = $script:Ui.LstLogs.SelectedItem
         if ($sel -and $sel.Tag) { Start-Process -FilePath 'notepad.exe' -ArgumentList ('"{0}"' -f $sel.Tag) }
-    })
-    $ui.ChkElevated.Add_Checked({ Update-CommandPreview }); $ui.ChkElevated.Add_Unchecked({ Update-CommandPreview })
-    $ui.BtnReadme.Add_Click({ Start-Process -FilePath (Join-Path $script:RepoRoot 'README.md') })
-    $ui.BtnLogs.Add_Click({ Start-Process -FilePath 'explorer.exe' -ArgumentList $env:TEMP })
-    $ui.BtnFolder.Add_Click({
+    } })
+    $ui.ChkElevated.Add_Checked({ Invoke-Handler 'Run elevated' { Update-CommandPreview } })
+    $ui.ChkElevated.Add_Unchecked({ Invoke-Handler 'Run elevated' { Update-CommandPreview } })
+    $ui.BtnReadme.Add_Click({ Invoke-Handler 'Open README' { Start-Process -FilePath (Join-Path $script:RepoRoot 'README.md') } })
+    $ui.BtnLogs.Add_Click({ Invoke-Handler 'Open log folder' { Start-Process -FilePath 'explorer.exe' -ArgumentList $env:TEMP } })
+    $ui.BtnFolder.Add_Click({ Invoke-Handler 'Open script folder' {
         if ($script:Current) { Start-Process -FilePath 'explorer.exe' -ArgumentList ('/select,"{0}"' -f $script:Current.FullPath) }
-    })
-    $ui.BtnCopy.Add_Click({
+    } })
+    $ui.BtnCopy.Add_Click({ Invoke-Handler 'Copy command' {
         if ($script:Ui.TxtCommand.Text) { [System.Windows.Clipboard]::SetText($script:Ui.TxtCommand.Text); Set-Status 'Command line copied to the clipboard.' }
-    })
-    $ui.BtnPreview.Add_Click({ Start-CurrentScript -Preview $true })
-    $ui.BtnRun.Add_Click({
+    } })
+    $ui.BtnPreview.Add_Click({ Invoke-Handler 'Preview' { Start-CurrentScript -Preview $true } })
+    $ui.BtnRun.Add_Click({ Invoke-Handler 'Run' {
         $s = $script:Current
         if (-not $s) { return }
         if ($s.risk -eq 'high') {
@@ -933,7 +988,7 @@ function Initialize-Window {
             if ($r -ne 'Yes') { Set-Status 'Cancelled.'; return }
         }
         Start-CurrentScript -Preview $false
-    })
+    } })
 
     $ui.LstGroups.SelectedIndex = 0
 }
@@ -949,6 +1004,8 @@ $script:Window        = $null
 $script:Ui            = $null
 $script:Theme         = 'light'
 $script:Settings      = $null
+$script:HandlerErrors    = 0
+$script:LastHandlerError = ''
 
 Initialize-Window
 
@@ -973,6 +1030,8 @@ if ($SelfTest) {
     }
     $missingBrush = @($script:Themes.light.Keys | Where-Object { -not $script:Themes.dark.ContainsKey($_) })
     if ($missingBrush.Count) { Write-Output ('FAIL     dark theme lacks: ' + ($missingBrush -join ', ')); $bad++ }
+    # Invoke-Handler turns a handler error into a status line; here it must fail.
+    if ($script:HandlerErrors) { Write-Output ('FAIL     {0} handler error(s); the last: {1}' -f $script:HandlerErrors, $script:LastHandlerError); $bad++ }
     Write-Output ('SELFTEST {0}: {1} scripts x 2 themes, {2} problem(s)' -f $(if ($bad) { 'FAILED' } else { 'PASSED' }), @($script:Catalog.scripts).Count, $bad)
     exit $(if ($bad) { 1 } else { 0 })
 }

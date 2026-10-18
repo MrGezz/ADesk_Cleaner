@@ -509,7 +509,7 @@ searches for an empty class name. Enumerate windows by title instead.
 
 ---
 
-## F4. WPF from PowerShell: an event handler is not a closure
+## F4. WPF from PowerShell: an event handler is not a closure, and its error closes the window
 
 The hub's Preview and Run buttons started nothing, from the day the hub was
 written. Both click handlers called a launcher kept in a local variable of the
@@ -539,8 +539,50 @@ reads empty (measured under 5.1), so the handler would lose the selected script.
 types `YES` into the console Run opens, and checks the fixture really was
 cleaned; it fails on the pre-fix hub.
 
+The closure was the cause, but the reason nobody saw it is wider: **any**
+exception in a handler ends the hub. Measured under 5.1: a terminating error in
+a handler escapes `ShowDialog()`, and with the hub's
+`$ErrorActionPreference = 'Stop'` so does every non-terminating one (a
+`Get-Item` on a missing path, a `Start-Process` on a missing file). Clicking
+Open README in a copy of the hub with no README.md beside it closed the window
+the same way. The hub now has two layers, and each was measured on its own:
+
+- **`Invoke-Handler`.** Every `Add_*` handler is one call to it,
+  `{ Invoke-Handler 'Open README' { ... } }`. It catches the error and puts
+  `Open README failed: <message> (line N)` in the status bar. The inner
+  scriptblock is created when the click arrives, so nothing has to be
+  captured. It is also the only layer that covers an event raised by a
+  PowerShell statement: `$list.SelectedIndex = 0` runs the SelectionChanged
+  handler synchronously, and that handler's error comes back to the statement
+  as `Exception setting "SelectedIndex"` without ever reaching the dispatcher.
+  During start-up that would end the hub before its window showed.
+- **`Dispatcher.UnhandledException` with `$e.Handled = $true`.** The net for a
+  handler someone adds without the wrapper. It caught every dispatched case
+  tried (terminating, non-terminating under 'Stop', a .NET method exception, a
+  cmdlet exception). `ShowDialog()` kept running, later handlers ran at the
+  same call-stack depth, and the exception still carries its PowerShell
+  `ErrorRecord`, so the report keeps the line number. It cannot name the
+  control, and on its own it misses the synchronous case above.
+
+Wrapping every handler would have made `-SelfTest` blind, since it raises the
+form's handlers and used to die on their errors. It now counts the errors
+`Invoke-Handler` absorbs and fails on any. `tests\Test-HubHandlerErrors.ps1`
+stages the hub without a README.md, clicks Open README twice through UI
+Automation, and requires the window to stay open, the error in the status bar
+and a search to still work in between; it also checks statically that every
+`Add_*` handler is a single `Invoke-Handler` call and that the net is
+registered. It fails on the pre-fix hub.
+
+A side effect seen in the same measurements: `Start-Process` on a document goes
+through ShellExecute, which pumps window messages, so a click queued behind the
+current one can run inside the handler that called `Start-Process`.
+
 > **Rule: a WPF handler may only reach script-scope state and script-level
 > functions. A local of the function that registered it is gone by click time.**
+>
+> **Rule: every handler body goes through `Invoke-Handler`, and the dispatcher
+> net stays registered. A hub with a hidden console must report a failure,
+> never vanish.**
 
 ---
 
@@ -605,6 +647,7 @@ line is a bug that already happened once.
 | 34 | Per-app pruning addresses `HKEY_USERS\<TargetSid>`, relayed across elevation - never HKCU | Clean-AudioDevices |
 | 35 | Ghost devnodes are removed only for confirmed deletions, never from the census plan; `tests\Test-AudioEndpointClassifier.ps1` and `tests\Test-AudioRegistryMechanism.ps1` pass, and fail in `-ExpectDefective` mode | Clean-AudioDevices |
 | 36 | Event handlers reach only script-scope state and script-level functions, never a local of the function that registered them; `tests\Test-HubLaunch.ps1` passes, and passes in `-ExpectDefective` mode against a pre-fix copy | hub\Start-Hub.ps1 |
+| 37 | Every `Add_*` handler body is one `Invoke-Handler` call, and the `Dispatcher.UnhandledException` net stays registered, so a handler error lands in the status bar and the window stays open; `-SelfTest` fails on any error `Invoke-Handler` absorbs; `tests\Test-HubHandlerErrors.ps1` passes, and passes in `-ExpectDefective` mode against a pre-fix copy | hub\Start-Hub.ps1 |
 
 ### Known outstanding drift
 

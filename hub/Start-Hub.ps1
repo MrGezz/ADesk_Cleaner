@@ -20,7 +20,9 @@
     its output, its prompts and its exit code are all there to read.
 
     If a button or list fails - a file it opens is missing, say - the reason
-    appears in the status bar at the bottom and the window stays open.
+    appears in the status bar at the bottom and the window stays open. If the
+    hub cannot start at all - catalog.json missing or malformed, say - a
+    message box gives the reason and the line, and the hub exits with code 1.
 
     Light and dark themes: the toggle in the header switches live and the choice
     is remembered in %LOCALAPPDATA%\ADeskCleaner\hub-settings.json. On first run
@@ -29,6 +31,8 @@
 .PARAMETER SelfTest
     Load the catalogue, parse every script, build the window and every parameter
     form in both themes, and exit without showing anything. Exit 0 means healthy.
+    An error that stops the hub is printed as a SELFTEST FAILED line on stdout,
+    with exit code 1, never in a message box.
 
 .EXAMPLE
     ..\Start-Hub.cmd
@@ -45,6 +49,39 @@
 param([switch]$SelfTest)
 
 $ErrorActionPreference = 'Stop'
+
+# An error that reaches the script itself - catalog.json missing or malformed,
+# the XAML failing to load, an element missing from it - ends the script, and
+# the hub runs with its console hidden, so the message went to a console nobody
+# sees and a double-click on Start-Hub.cmd did nothing at all. This trap shows
+# the error and its line in a message box instead, then exits 1. -SelfTest runs
+# unattended: there it prints the same text on stdout and exits 1, no box.
+#
+# A trap covers its whole scope wherever it stands, so this one also covers
+# Add-Type and the STA relaunch below; it is self-contained because it can fire
+# before any function here is defined. Handler errors never reach it:
+# Invoke-Handler and the dispatcher net take them first (measured under 5.1).
+# Unlike a catch around the main block, it gets the .NET exception unwrapped,
+# so a XAML failure reads as the parser's message rather than 'Exception
+# calling "Load"'. tests\Test-HubStartupErrors.ps1 checks it.
+trap {
+    $text = 'unknown error'
+    try {
+        $at = $(if ($_.InvocationInfo -and $_.InvocationInfo.ScriptLineNumber) { ' (line {0})' -f $_.InvocationInfo.ScriptLineNumber } else { '' })
+        $text = '{0}{1}' -f $_.Exception.Message, $at
+    } catch { }
+    if ($SelfTest) {
+        Write-Output ('SELFTEST FAILED: ' + $text)
+    } else {
+        try {
+            Add-Type -AssemblyName PresentationFramework
+            [void][System.Windows.MessageBox]::Show(('The hub stopped on an error:{0}{0}{1}' -f [Environment]::NewLine, $text), 'ADesk Cleaner', 'OK', 'Error')
+        } catch {
+            [Console]::Error.WriteLine($text)
+        }
+    }
+    exit 1
+}
 
 # WPF needs a single-threaded apartment. powershell.exe is STA by default; an
 # -MTA host or a hosted runspace is not, so relaunch rather than fail.

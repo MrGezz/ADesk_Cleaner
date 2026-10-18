@@ -586,6 +586,70 @@ current one can run inside the handler that called `Start-Process`.
 
 ---
 
+## F5. WPF from PowerShell: an error before the window shows needs a trap
+
+F4 keeps the hub open when a handler fails. An error outside the handlers still
+ended it before the window showed: `catalog.json` missing or malformed, the
+XAML failing to load, an element missing from it. Measured on the pre-fix hub,
+each one wrote the error to the console that `Start-Hub.cmd` hides and exited
+with code 1, so a double-click did nothing at all. `-SelfTest` printed the same
+error on stderr and nothing on stdout.
+
+The hub now declares a `trap` at script scope, right after
+`$ErrorActionPreference = 'Stop'`. It shows the error and its line
+(`$_.InvocationInfo.ScriptLineNumber`) in a message box and exits 1. Under
+`-SelfTest`, which runs unattended, it prints
+`SELFTEST FAILED: <message> (line N)` on stdout and exits 1 with no box.
+
+A trap and a `try`/`catch` around the main block were measured side by side
+under 5.1, on a `throw` in a function, a `ConvertFrom-Json` failure, a
+non-terminating error under 'Stop', a XAML parse failure, and an error raised
+in a dispatched callback:
+
+- Both report the same line, and both exit with the code they are given.
+- Neither takes a dispatched error away from the `Dispatcher.UnhandledException`
+  net. With the net registered, the net reports it and `ShowDialog()` carries
+  on; without the net, both see the error once `ShowDialog()` throws. Checked
+  again on the real hub: with the trap in place and one handler left
+  unguarded, the click is reported as "A window event failed" and the window
+  stays open.
+- A trap covers its whole scope wherever it stands. Declared on the last line,
+  it still caught errors raised above it, so one trap also covers `Add-Type`
+  and the STA relaunch. A `catch` covers only the block it wraps.
+- A trap receives the .NET exception unwrapped: a XAML failure reads as the
+  parser's own message, where a `catch` gets
+  `Exception calling "Parse" with "1" argument(s): ...`.
+
+The trap body is self-contained, because it can fire before any function in
+the script is defined, and every path through it ends in `exit 1`: a trap that
+falls through resumes at the statement after the one that failed. A parse error
+in `Start-Hub.ps1` itself is still silent, since the script never starts;
+`-SelfTest` from a console shows it.
+
+`tests\Test-HubStartupErrors.ps1` stages the hub with no `catalog.json`, with a
+truncated one, and with `BtnCopy` renamed in its XAML; starts each one hidden,
+as `Start-Hub.cmd` does; finds the message box under the hub's process id;
+checks the message and the line number, read from the staged hub's syntax
+tree; closes the box; and requires a non-zero exit code. It then runs
+`-SelfTest` on the absent catalogue and requires exit 1, no window, and the
+error on stdout. It fails on the pre-fix hub, and on mutants that drop the line
+number or show the box under `-SelfTest`.
+
+Writing the test turned up one more pitfall. The managed UI Automation client
+(`System.Windows.Automation`) reports a message box's children as bare `Pane`s
+with no patterns when the Win32 client-side providers are not loaded, and
+registering them by hand threw. A search by `ControlType.Text` or
+`ControlType.Button` found nothing, and the OK button offered no
+`InvokePattern`. The test finds the text by window class (`Static`) and closes
+the box through the dialog's own `WindowPattern.Close`, which a box with only
+OK takes as OK.
+
+> **Rule: an error that reaches the hub's own scope ends in a message box and a
+> non-zero exit, never in a hidden console. `-SelfTest` prints it on stdout and
+> never shows a box.**
+
+---
+
 ## G. The meta-lesson: drift between sibling scripts
 
 These scripts deliberately ship as **standalone files** with no shared module, so
@@ -648,6 +712,7 @@ line is a bug that already happened once.
 | 35 | Ghost devnodes are removed only for confirmed deletions, never from the census plan; `tests\Test-AudioEndpointClassifier.ps1` and `tests\Test-AudioRegistryMechanism.ps1` pass, and fail in `-ExpectDefective` mode | Clean-AudioDevices |
 | 36 | Event handlers reach only script-scope state and script-level functions, never a local of the function that registered them; `tests\Test-HubLaunch.ps1` passes, and passes in `-ExpectDefective` mode against a pre-fix copy | hub\Start-Hub.ps1 |
 | 37 | Every `Add_*` handler body is one `Invoke-Handler` call, and the `Dispatcher.UnhandledException` net stays registered, so a handler error lands in the status bar and the window stays open; `-SelfTest` fails on any error `Invoke-Handler` absorbs; `tests\Test-HubHandlerErrors.ps1` passes, and passes in `-ExpectDefective` mode against a pre-fix copy | hub\Start-Hub.ps1 |
+| 38 | The script-level `trap` stays self-contained and ends in `exit 1`: an error that reaches the hub's own scope shows a message box with the message and its line, and under `-SelfTest` prints a `SELFTEST FAILED` line on stdout instead, with no box; `tests\Test-HubStartupErrors.ps1` passes, and passes in `-ExpectDefective` mode against a pre-fix copy | hub\Start-Hub.ps1 |
 
 ### Known outstanding drift
 

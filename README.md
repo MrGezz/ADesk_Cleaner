@@ -45,6 +45,7 @@ tests\               Test-PyRevitFences.ps1 - regression test for the pyRevit de
                      Test-AudioRegistryMechanism.ps1 - its locked-key delete and restore, on a scratch replica (elevated)
                      Test-HubLaunch.ps1 - the hub's Preview and Run buttons really start and clean
                      Test-HubHandlerErrors.ps1 - a failing hub button is reported and the window stays open
+                     Test-HubStartupErrors.ps1 - a hub that cannot start says why in a message box
 ```
 
 Each script sits beside its `.cmd` launcher in its `scripts\` folder. The usage lines in this
@@ -70,6 +71,8 @@ hub and open in Notepad on double-click. The **Dark mode** toggle in the header 
 theme live; the choice is remembered in `%LOCALAPPDATA%\ADeskCleaner\hub-settings.json`, and on
 first run the hub follows Windows' own app mode. If a button or list fails (a file it opens is
 missing, say), the reason appears in the status bar at the bottom and the window stays open.
+If the hub cannot start at all (`catalog.json` missing or malformed, say), a message box gives
+the reason and the line, and the hub exits with code 1.
 `hub\Start-Hub.ps1 -SelfTest` parses every
 script and builds every form in both themes without showing the window — run it after adding
 a script to `catalog.json`.

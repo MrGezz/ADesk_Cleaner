@@ -836,6 +836,26 @@ function Update-ScriptList {
     if ($shown -gt 0) { $lst.SelectedIndex = 0 }
 }
 
+# Must stay a script-level function. The click handlers run after
+# Initialize-Window has returned, and a PowerShell scriptblock is not a closure:
+# it looks its variables up when it runs. Kept in a local variable of
+# Initialize-Window, the launcher was $null by click time, "& $null" threw, the
+# error escaped ShowDialog and the hub closed without a word (its console is
+# hidden), so Preview and Run never started anything.
+function Start-CurrentScript {
+    param([bool]$Preview)
+    if (-not $script:Current) { return }
+    try {
+        Start-CatalogScript -Script $script:Current -Preview $Preview -Elevated ([bool]$script:Ui.ChkElevated.IsChecked) | Out-Null
+        Set-Status ('{0} {1} in a new window{2}. Its output stays there until you press Enter.' -f
+            $(if ($Preview) { 'Previewing' } else { 'Started' }), $script:Current.name,
+            $(if ($script:Ui.ChkElevated.IsChecked) { ' (elevated)' } else { '' }))
+        Show-Logs $script:Current
+    } catch {
+        Set-Status ('Not started: ' + $_.Exception.Message)
+    }
+}
+
 function Initialize-Window {
     $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
     $script:Window = [System.Windows.Markup.XamlReader]::Load($reader)
@@ -903,20 +923,7 @@ function Initialize-Window {
     $ui.BtnCopy.Add_Click({
         if ($script:Ui.TxtCommand.Text) { [System.Windows.Clipboard]::SetText($script:Ui.TxtCommand.Text); Set-Status 'Command line copied to the clipboard.' }
     })
-    $launch = {
-        param([bool]$Preview)
-        if (-not $script:Current) { return }
-        try {
-            Start-CatalogScript -Script $script:Current -Preview $Preview -Elevated ([bool]$script:Ui.ChkElevated.IsChecked) | Out-Null
-            Set-Status ('{0} {1} in a new window{2}. Its output stays there until you press Enter.' -f
-                $(if ($Preview) { 'Previewing' } else { 'Started' }), $script:Current.name,
-                $(if ($script:Ui.ChkElevated.IsChecked) { ' (elevated)' } else { '' }))
-            Show-Logs $script:Current
-        } catch {
-            Set-Status ('Not started: ' + $_.Exception.Message)
-        }
-    }
-    $ui.BtnPreview.Add_Click({ & $launch $true })
+    $ui.BtnPreview.Add_Click({ Start-CurrentScript -Preview $true })
     $ui.BtnRun.Add_Click({
         $s = $script:Current
         if (-not $s) { return }
@@ -925,7 +932,7 @@ function Initialize-Window {
             $r = [System.Windows.MessageBox]::Show($script:Window, $msg, 'ADesk Cleaner', 'YesNo', 'Warning')
             if ($r -ne 'Yes') { Set-Status 'Cancelled.'; return }
         }
-        & $launch $false
+        Start-CurrentScript -Preview $false
     })
 
     $ui.LstGroups.SelectedIndex = 0

@@ -509,6 +509,41 @@ searches for an empty class name. Enumerate windows by title instead.
 
 ---
 
+## F4. WPF from PowerShell: an event handler is not a closure
+
+The hub's Preview and Run buttons started nothing, from the day the hub was
+written. Both click handlers called a launcher kept in a local variable of the
+function that built the window:
+
+```powershell
+function Initialize-Window {
+    $launch = { param([bool]$Preview) ... }
+    $ui.BtnPreview.Add_Click({ & $launch $true })
+}
+```
+
+A PowerShell scriptblock does not capture the variables around it; it looks them
+up when it runs. The click arrives during `ShowDialog()`, long after
+`Initialize-Window` has returned, so `$launch` is `$null` and `& $null` throws
+"The expression after '&' in a pipeline element produced an object that was not
+valid". The exception escapes `ShowDialog()` and ends the script. The hub runs
+with its console hidden, so the window simply vanished: no message, no console,
+nothing cleaned. `-SelfTest` builds every form but never clicks, so it passed.
+
+Fixed by making the launcher a script-level function, like every other handler
+target in the hub. `.GetNewClosure()` is not the fix here: it copies the locals
+at registration time into a dynamic module, and inside it `$script:Current`
+reads empty (measured under 5.1), so the handler would lose the selected script.
+
+`tests\Test-HubLaunch.ps1` now clicks the real buttons through UI Automation,
+types `YES` into the console Run opens, and checks the fixture really was
+cleaned; it fails on the pre-fix hub.
+
+> **Rule: a WPF handler may only reach script-scope state and script-level
+> functions. A local of the function that registered it is gone by click time.**
+
+---
+
 ## G. The meta-lesson: drift between sibling scripts
 
 These scripts deliberately ship as **standalone files** with no shared module, so
@@ -569,6 +604,7 @@ line is a bug that already happened once.
 | 33 | The audio services are restarted under three layers: Ctrl+C read as input, an engine-exit handler, and a `finally` with retries | Clean-AudioDevices |
 | 34 | Per-app pruning addresses `HKEY_USERS\<TargetSid>`, relayed across elevation - never HKCU | Clean-AudioDevices |
 | 35 | Ghost devnodes are removed only for confirmed deletions, never from the census plan; `tests\Test-AudioEndpointClassifier.ps1` and `tests\Test-AudioRegistryMechanism.ps1` pass, and fail in `-ExpectDefective` mode | Clean-AudioDevices |
+| 36 | Event handlers reach only script-scope state and script-level functions, never a local of the function that registered them; `tests\Test-HubLaunch.ps1` passes, and passes in `-ExpectDefective` mode against a pre-fix copy | hub\Start-Hub.ps1 |
 
 ### Known outstanding drift
 

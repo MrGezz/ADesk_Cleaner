@@ -43,6 +43,7 @@ tests\               Test-PyRevitFences.ps1 - regression test for the pyRevit de
                      Test-TranscriptUnderWhatIf.ps1 - every script still writes its log under -WhatIf
                      Test-AudioEndpointClassifier.ps1 - which audio endpoints Clean-AudioDevices may remove
                      Test-AudioRegistryMechanism.ps1 - its locked-key delete and restore, on a scratch replica (elevated)
+                     Test-HubLaunch.ps1 - the hub's Preview and Run buttons really start and clean
 ```
 
 Each script sits beside its `.cmd` launcher in its `scripts\` folder. The usage lines in this
